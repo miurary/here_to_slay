@@ -1,10 +1,69 @@
 {
-
     "i_001": {
-
+        "id": "i_001",
+        "name": "Goblet of Caffeination",
+        "type": "item",
+        "abilityText": "If you unsuccessfully roll to usse the equipped Hero card's effect, you may SACRIFICE this card, then roll to use that effect again immediately.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_FAIL",
+            "scope": "equipped_hero",
+            "optional": true,
+            "cost": [
+                { "action": "SACRIFICE_SELF" }
+            ],
+            "effects": [
+                { "action": "REROLL_HERO_ABILITY", "target": "equipped_hero" }
+            ]
+        }
     },
     "i_002": {
-
+        "id": "i_002",
+        "name": "Ranger Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Ranger instead of its original class.",
+        "playTarget": "hero",
+        "passsiveModifiers": [
+            { "stat": "class", "override": "ranger" } 
+        ]
+    },
+    "i_003": {
+        "id": "i_003",
+        "name": "Really Big Ring",
+        "type": "item",
+        "abilityText": "Each time you roll to use the equipped Hero card's effect, +2 to your roll.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_ATTEMPT",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "MODIFY_ROLL", "amount": 2}
+            ]
+        }
+    },
+    "i_004": {
+        "id": "i_004",
+        "name": "Biggest Ring Ever",
+        "type": "item",
+        "abilityText": "Each time you roll to use the equipped Hero card's effect, +2 to your roll.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_ATTEMPT",
+            "scope": "equipped_hero",
+            "optional": true,
+            "cost": [
+                {
+                    "action": "DISCARD_CARDS",
+                    "min": 0,
+                    "max": 3,
+                    "target": "self"
+                }
+            ],
+            "effects": [
+                { "action": "MODIFY_ROLL", "amount": 2, "perUnit": "CARDS_DISCARDED"}
+            ]
+        }
     }
 
 }
