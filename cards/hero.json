@@ -1,0 +1,372 @@
+{
+    "h_001": {
+        "id": "h_001",
+        "name": "Bark Hexer",
+        "class": "necromancer",
+        "abilityText": "DISCARD a card. Each other player must DISCARD 2 cards.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "costs": [
+                {
+                    "type": "DISCARD",
+                    "cardType": "any",
+                    "amount": 1
+                }
+            ],
+            "effects": [
+                {
+                    "action": "PROMPT_DISCARD",
+                    "amount": 2,
+                    "target": "all_opponents"
+                }
+            ]
+        }
+    },
+    "h_002": {
+        "id": "h_002",
+        "name": "Shadow Saint",
+        "class": "necromancer",
+        "abilityText": "DISCARD a Modifier card. No other player can play Modifier cards until the end of your turn.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": true,
+            "costs": [
+                {
+                    "type": "DISCARD",
+                    "cardType": "modifier",
+                    "amount": 1,
+                    "targetZone": "hand"
+                }
+            ],
+            "effects": [
+                {
+                    "action": "APPLY_ROOM_FLAG",
+                    "flag": "lockModifiers",
+                    "duration": "END_OF_TURN",
+                    "target": "all_opponents"
+                }
+            ]
+        }
+    },
+    "h_003": {
+        "id": "h_003",
+        "name": "Vicious Wildcat",
+        "class": "berserker",
+        "abilityText": "SLAY any Monster card, then end your turn.",
+        "type": "hero",
+        "rollToPlay": 12,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "zone": "monsters",
+                "cardType": "monster"
+            },
+            "effects": [
+                {
+                    "action": "SLAY",
+                    "target": "selected"
+                },
+                {
+                    "action": "FORCE_END_TURN",
+                    "target": "game"
+                }
+            ]
+        }
+    },
+    "h_004": {
+        "id": "h_004",
+        "name": "Meowntain",
+        "class": "berserker",
+        "abilityText": "SACRIFICE a card. +5 to all of your rolls until the end of your turn.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": true,
+            "costs": [
+                {
+                    "type": "SACRIFICE",
+                    "cardType": "any",
+                    "amount": 1
+                }
+            ],
+            "effects": [
+                {
+                    "action": "APPLY_PLAYER_MODIFIER",
+                    "modifierType": "rollBonus",
+                    "amount": 5,
+                    "duration": "END_OF_TURN"
+                }
+            ]
+        }
+    },
+    "h_005": {
+        "id": "h_005",
+        "name": "Radiant Horn",
+        "class": "guardian",
+        "abilityText": "Search the discard pile for a Modifier card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "zone": "discard_pile",
+                "cardType": "modifier"
+            },
+            "effects": [
+                {
+                    "action": "MOVE_CARD",
+                    "target": "selected",
+                    "destination": "hand"
+                }
+            ]
+        }
+    },
+    "h_006": {
+        "id": "h_006",
+        "name": "Vibrant Glow",
+        "class": "guardian",
+        "abilityText": "+5 to all of your rolls until the end of your turn.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": true,
+            "effects": [
+                {
+                    "action": "APPLY_PLAYER_MODIFIER",
+                    "modifierType": "rollBonus",
+                    "amount": 5,
+                    "duration": "END_OF_TURN"
+                }
+            ]
+        }
+    },
+    "h_007": {
+        "id": "h_007",
+        "name": "Tough Teddy",
+        "class": "fighter",
+        "abilityText": "Each other player with a Fighter in their Party must DISCARD a card.",
+        "type": "hero",
+        "rollToPlay": 4,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                {
+                    "action": "PROMPT_DISCARD",
+                    "target": "all_opponents",
+                    "amount": 1,
+                    "condition": {
+                        "type": "HAS_CARD_IN_ZONE",
+                        "zone": "party",
+                        "class": "fighter"
+                    }
+                }
+            ]
+        }
+    },
+    "h_008": {
+        "id": "h_008",
+        "name": "Heavy Bear",
+        "class": "fighter",
+        "abilityText": "Choose a player. That player must DISCARD 2 cards.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "type": "player",
+                "eligibility": "any"
+            },
+            "effects": [
+                {
+                    "action": "PROMPT_DISCARD",
+                    "target": "selected_player",
+                    "amount": 2
+                }
+            ]
+        }
+    },
+    "h_009": {
+        "id": "h_009",
+        "name": "Lookie Rookie",
+        "class": "ranger",
+        "abilityText": "Search the discard pile for an item card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "zone": "discard_pile",
+                "cardType": "item"
+            },
+            "effects": [
+                {
+                    "action": "MOVE_CARD",
+                    "target": "selected",
+                    "destination": "hand"
+                }
+            ]
+        }
+    },
+    "h_010": {
+        "id": "h_010",
+        "name": "Sharp Fox",
+        "class": "ranger",
+        "abilityText": "Look at another player's hand.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "type": "player",
+                "eligibility": "opponent"
+            },
+            "effects": [
+                {
+                    "action": "VIEW_HAND",
+                    "target": "selected_player"
+                }
+            ]
+        }
+    },
+    "h_011": {
+        "id": "h_011",
+        "name": "Smooth Mimimeow",
+        "class": "thief",
+        "abilityText": "Pull a card from the hand of each other player with a Thief in their Party.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                {
+                    "action": "STEAL_RANDOM_CARD",
+                    "target": "all_opponents",
+                    "amount": 1,
+                    "source": "hand",
+                    "destination": "hand",
+                    "condition": {
+                        "type": "HAS_CARD_IN_ZONE",
+                        "zone": "party",
+                        "cardClass": "thief"
+                    }
+                }
+            ]
+        }
+    },
+    "h_012": {
+        "id": "h_012",
+        "name": "Meowzio",
+        "class": "thief",
+        "abilityText": "Choose a player. STEAL a Hero card from that player's Party and pull a card from that player's hand.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "zone": "party",
+                "cardType": "hero",
+                "eligibility": "opponent"
+            },
+            "effects": [
+                {
+                    "action": "MOVE_CARD",
+                    "target": "selected",
+                    "destination": "party"
+                },
+                {
+                    "action": "STEAL_RANDOM_CARD",
+                    "target": "target_owner",
+                    "amount": 1,
+                    "source": "hand",
+                    "destination": "hand"
+                }
+            ]
+        }
+    },
+    "h_013": {
+        "id": "h_013",
+        "name": "Fuzzy Cheeks",
+        "class": "bard",
+        "abilityText": "DRAW a card and play a Hero card from your hand immediately.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                {
+                    "action": "DRAW",
+                    "amount": 1,
+                    "target": "self"
+                },
+                {
+                    "action": "PLAY_FROM_HAND",
+                    "cardType": "hero",
+                    "target": "self"
+                }
+            ]
+        }
+    },
+    "h_014": {
+        "id": "h_014",
+        "name": "Fuzzy Cheeks",
+        "class": "bard",
+        "abilityText": "DRAW 2 cards.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                {
+                    "action": "DRAW",
+                    "amount": 2,
+                    "target": "self"
+                }
+            ]
+        }
+    },
+    "h_015": {
+        "id": "h_015",
+        "name": "Bun Bun",
+        "class": "wizard",
+        "abilityText": "Search the discard pile for a Magic card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": {
+                "zone": "discard_pile",
+                "cardType": "magic"
+            },
+            "effects": [
+                {
+                    "action": "MOVE_CARD",
+                    "target": "selected",
+                    "destination": "hand"
+                }
+            ]
+        }
+    },
+    "h_016": {
+        "id": "h_016",
+        "name": "Spooky",
+        "class": "wizard",
+        "abilityText": "Each other player must SACRIFICE a hero card.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                {
+                    "action": "PROMPT_SACRIFICE",
+                    "target": "all_opponents",
+                    "amount": 1,
+                    "cardType": "hero",
+                    "targetZone": "party"
+                }
+            ]
+        }
+    }
+}
