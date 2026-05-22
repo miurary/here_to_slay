@@ -1,0 +1,61 @@
+{
+    "ci_001": {
+        "id": "ci_001",
+        "name": "Sealing Key",
+        "type": "item",
+        "subtype": "cursed",
+        "text": "You cannot use the equipped Hero card's effect.",
+        "playTarget": "hero",
+        "passiveModifiers": [
+            { "stat": "heroEffectLocked", "value": true}
+        ]
+    },
+    "ci_002": {
+        "id": "ci_002",
+        "name": "Curse of the Snake's Eyes",
+        "type": "item",
+        "subtype": "cursed",
+        "text": "Each time you roll to use the equipped Hero card's effect, -2 to your roll.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_ATTEMPT",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "MODIFY_ROLL", "amount": -2 }
+            ]
+        }
+    },
+    "ci_003": {
+        "id": "ci_003",
+        "name": "Dragon's Bile",
+        "type": "item",
+        "subtype": "cursed",
+        "text": "If you unsuccessfully roll to use the equipped Hero card's effect, SACRIFICE a Hero card.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_FAIL",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "PROMPT_SACRIFICE_HERO", "target": "self", "amount": 1 }
+            ]
+        }
+    },
+    "ci_004": {
+        "id": "ci_004",
+        "name": "Suspiciously Shiny Coin",
+        "type": "item",
+        "subtype": "cursed",
+        "text": "If you successfully roll to use the equipped Hero card's effect, DISCARD a card.",
+        "playTarget": "hero",
+        "trigger": {
+            "event": "ON_HERO_ROLL_SUCCESS",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "DISCARD", "target": "self", "amount": 1 }
+            ]
+        }
+    }
+}

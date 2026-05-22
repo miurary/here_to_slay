@@ -23,7 +23,7 @@
         "type": "item",
         "abilityText": "The equipped Hero card is considered a Ranger instead of its original class.",
         "playTarget": "hero",
-        "passsiveModifiers": [
+        "passiveModifiers": [
             { "stat": "class", "override": "ranger" } 
         ]
     },
