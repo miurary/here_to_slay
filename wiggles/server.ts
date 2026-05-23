@@ -3,19 +3,7 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 
-// Define what the server receives from the client
-interface ClientToServerEvents {
-  pingServer: () => void;
-  // Later you'll add things like: 
-  // playCard: (payload: { cardInstanceId: string }) => void;
-}
-
-// Define what the server sends to the client
-interface ServerToClientEvents {
-  pongClient: (data: { message: string }) => void;
-  // Later: 
-  // stateUpdate: (state: GameState) => void;
-}
+import type { ClientToServerEvents, ServerToClientEvents, GameState, Player } from '../shared/types.js'
 
 const app = express();
 app.use(cors());
@@ -30,8 +18,31 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   }
 });
 
+const gameState: GameState = {
+  gameId: 'game-1',
+  status: 'waiting',
+  activePlayerId: '',
+  turnNumber: 0,
+  phase: 'DRAW',
+  players: {},
+  stack: []
+};
+
 io.on('connection', (socket: Socket) => {
   console.log(`Player connected: ${socket.id}`);
+  gameState.players[socket.id] = {
+    id: socket.id,
+    zones: {
+      hand: [],
+      party: []
+    }
+  };
+
+  if (!gameState.activePlayerId) {
+    gameState.activePlayerId = socket.id;
+  }
+
+  io.emit('playersUpdated', Object.values(gameState.players));
 
   // TypeScript knows 'pingServer' is a valid event!
   socket.on('pingServer', () => {
@@ -41,8 +52,33 @@ io.on('connection', (socket: Socket) => {
     socket.emit('pongClient', { message: "Connection successful!" });
   });
 
+  socket.on('setUsername', (username) => {
+    const player = gameState.players[socket.id];
+    if (player) {
+      player.username = username;
+    } else {
+      gameState.players[socket.id] = {
+        id: socket.id,
+        username: username,
+        zones: {
+          hand: [],
+          party: []
+        }
+      };
+    }
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
   socket.on('disconnect', () => {
     console.log(`Player disconnected: ${socket.id}`);
+
+    delete gameState.players[socket.id];
+
+    if (gameState.activePlayerId === socket.id) {
+      gameState.activePlayerId = Object.keys(gameState.players)[0] ?? '';
+    }
+
+    io.emit('playersUpdated', Object.values(gameState.players));
   });
 });
 
