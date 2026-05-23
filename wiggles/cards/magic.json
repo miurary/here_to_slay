@@ -1,0 +1,94 @@
+{
+    "s_001": {
+        "id": "s_001",
+        "name": "Destructive Spell",
+        "abilityText": "DISCARD a card, then DESTROY a Hero Card.",
+        "type": "magic",
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                {
+                    "action": "DISCARD",
+                    "zoneToSelectFrom": "hand",
+                    "amount": 1,
+                    "destination": "discard_pile",
+                    "target": "self"
+                },
+                {
+                    "action": "DESTROY_HERO",
+                    "zoneToSelectFrom": "opponent_party",
+                    "amount": 1,
+                    "destination": "discard_pile",
+                    "target": "ANY_OPPONENT"
+                }
+            ]
+        }
+    },
+    "s_002": {
+        "id": "s_002",
+        "name": "Enchanted Spell",
+        "abilityText": "+2 to all of your rolls until the end of your turn",
+        "type": "magic",
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "action": "APPLY_ROLL_MODIFIER",
+            "amount": 2,
+            "duration": "ALL_ROLL",
+            "target": "self"
+        }
+    },
+    "s_003": {
+        "id": "s_003",
+        "name": "Forced Exchange",
+        "abilityText": "choose a player. STEAL a Hero card from that player's Party, then move a Hero card from your Party to that player's Party",
+        "type": "magic",
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                {
+                    "action": "STEAL",
+                    "zoneToSelectFrom": "opponent_party",
+                    "amount": 1,
+                    "destination": "party",
+                    "target": "ANY_OPPONENT"
+                },
+                {
+                    "action": "SWAP",
+                    "zoneToSelectFrom": "party",
+                    "amount": 1,
+                    "destination": "opponent_party",
+                    "target": "self"
+                }
+            ]
+        }
+    },
+    "s_004": {
+        "id": "s_004",
+        "name": "Critical Boost",
+        "abilityText": "DRAW 3 cards and DISCARD a card.",
+        "type": "magic",
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                {
+                    "action": "DRAW",
+                    "zoneToSelectFrom": "deck",
+                    "amount": 3,
+                    "destination": "hand",
+                    "target": "self"
+                },
+                {
+                    "action": "DISCARD",
+                    "zoneToSelectFrom": "hand",
+                    "amount": 1,
+                    "destination": "discard_pile",
+                    "target": "self"
+                }
+            ]
+        }
+    }
+}

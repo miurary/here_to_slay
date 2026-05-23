@@ -1,0 +1,142 @@
+{
+    "m_001": {
+        "id": "m_001",
+        "name": "Doombringer",
+        "type": "monster",
+        "requirements": [
+            { "class": "necromancer", "amount": 1},
+            { "class": "hero", "amount": 1}
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": -1, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD your hand",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster"}
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_SACRIFICE",
+            "isOptional": true,
+            "action": "PROMPT_SELECT",
+            "zoneToSelectFrom": "discard_pile",
+            "amount": 1,
+            "destination": "hand"
+        },
+        "slainEffectText": "Each time you SACRIFICE a card, you may choose a card from the discard pile and add it to your hand."
+    },
+    "m_002": {
+        "id": "m_002",
+        "name": "Mega Slime",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 4}
+        ],
+        "lowerBound": 7,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": -1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster"},
+            { "action": "DRAW", "amount": 2, "target": "self"}
+        ],
+        "upperBoundText": "SLAY this Monster card & DRAW 2 cards",
+        "slainEffect": {
+            "triggerEvent": "ON_TURN_START",
+            "isOptional": false,
+            "action": "EXTRA_AP",
+            "amount": 1
+        },
+        "slainEffectText": "You may spend an extra action point on each of your turns."
+    },
+    "m_003": {
+        "id": "m_003",
+        "name": "Warworn Owlbear",
+        "type": "monster",
+        "requirements": [
+            { "class": "thief", "amount": 1},
+            { "class": "hero", "amount": 1}
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster"}
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "NO_TRIGGER",
+            "isOptional": false,
+            "action": "APPLY_ROOM_FLAG",
+            "flag": "blockItemChallenges",
+            "duration": "END_OF_GAME",
+            "target": "self"
+        },
+        "slainEffectText": "Item cards you play cannot be challenged."
+    },
+    "m_004": {
+        "id": "m_004",
+        "name": "Dark Dragon King",
+        "type": "monster",
+        "requirements": [
+            { "class": "bard", "amount": 1},
+            { "class": "hero", "amount": 1}
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster"}
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_HERO_ABILITY_ROLL",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "HERO_ABILITY_ROLLS",
+            "modifier": 1,
+            "target": "self"
+        },
+        "slainEffectText": "Each time you roll for a Hero card's effect, +1 to your roll."
+    },
+    "m_005": {
+        "id": "m_005",
+        "name": "Rex Major",
+        "type": "monster",
+        "requirements": [
+            { "class": "Guardian", "amount": 1},
+            { "class": "hero", "amount": 1}
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster"}
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_DRAW_MODIFIER",
+            "isOptional": true,
+            "action": "DRAW_CARD",
+            "condition": "REVEAL_TRIGGER_CARD",
+            "zoneToSelectFrom": "deck",
+            "amount": 1,
+            "destination": "hand"
+        },
+        "slainEffectText": "Each time you DRAW a Modifier card, you may reveal it and DRAW a second card."
+    }
+}
+    

@@ -1,0 +1,108 @@
+{
+    "p_001": {
+        "id": "p_001",
+        "name": "The Raging Manticore",
+        "class": "berserker",
+        "abilityText": "Each time you SLAY a Monster card, DRAW 2 cards.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_SLAY",
+            "isOptional": false,
+            "action": "DRAW",
+            "zoneToSelectFrom": "deck",
+            "amount": 2,
+            "destination": "hand"
+        }
+    },
+    "p_002": {
+        "id": "p_002",
+        "name": "The Fist of Reason",
+        "class": "warrior",
+        "abilityText": "Each time you roll to CHALLENGE, +2 to your roll.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_CHALLENGE",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "CHALLENGE_ROLLS",
+            "modifier": 2,
+            "target": "self"
+        }
+    },
+    "p_003": {
+        "id": "p_003",
+        "name": "The Charismatic Song",
+        "class": "bard",
+        "abilityText": "Each time you roll to use a Hero card's effect, +1 to your roll.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_HERO_ABILITY_ROLL",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "HERO_ABILITY_ROLLS",
+            "modifier": 1,
+            "target": "self"
+        }
+    },
+    "p_004": {
+        "id": "p_004",
+        "name": "The Protecting Horn",
+        "class": "guardian",
+        "abilityText": "Each time you play a Modifier card on a roll, +1 or -1 to that roll.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_MODIFIER_PLAYED",
+            "isOptional": false,
+            "action": "APPLY_ROLL_MODIFIER",
+            "amount": "MODIFIER_CARD_VALUE",
+            "duration": "SINGLE_ROLL",
+            "target": "self"
+        }
+    },
+    "p_005": {
+        "id": "p_005",
+        "name": "The Divine Arrow",
+        "class": "ranger",
+        "abilityText": "Each time you roll to ATTACK a Monster card, +1 to your roll.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_ATTACK_ROLL",
+            "isOptional": false,
+            "action": "APPLY_ROLL_MODIFIER",
+            "amount": 1,
+            "mduration": "SINGLE_ROLL",
+            "target": "self"
+        }
+    },
+    "p_006": {
+        "id": "p_006",
+        "name": "The Shadow Claw",
+        "class": "thief",
+        "abilityText": "Once per turn on your turn, you may spend an action point to pull a card from another player's hand.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_TURN_START",
+            "isOptional": true,
+            "action": "STEAL_CARD",
+            "cost": "AP",
+            "zoneToSelectFrom": "opponent_hand",
+            "destination": "hand",
+            "target": "ANY_OPPONENT"
+        }
+    },
+    "p_007": {
+        "id": "p_007",
+        "name": "The Cloaked Sage",
+        "class": "wizard",
+        "abilityText": "Each time you play a Magic card, DRAW a card.",
+        "type": "partyLeader",
+        "effect": {
+            "triggerEvent": "ON_DRAW_MAGIC",
+            "isOptional": false,
+            "action": "DRAW",
+            "zoneToSelectFrom": "deck",
+            "destination": "hand"
+        }
+    }
+
+}
