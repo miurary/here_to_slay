@@ -1,0 +1,47 @@
+{
+    "chal_001": {
+        "id": "chal_001",
+        "name": "Challenge",
+        "type": "challenge",
+        "abilityText": "You may play this card when another player attempts to play a Hero, Item, or Magic card. CHALLENGE that card.",
+        "onEvent": {
+            "trigger": "ON_CARD_PLAYED",
+            "targetRequirement": {
+                "cardType": ["hero", "item", "magic"],
+                "eligibility": "opponent"
+            },
+            "effect": {
+                "action": "INITIATE_CHALLENGE",
+                "cost": "DISCARD_SELF"
+            }
+        }
+    },
+    "chal_002": {
+        "id": "chal_002",
+        "name": "Berserker Challenge",
+        "type": "challenge",
+        "abilityText": "You may play this card when another player attempts to play a Hero, Item, or Magic card. CHALLENGE that card. +3 to your roll.",
+        "onEvent": {
+            "trigger": "ON_CARD_PLAYED",
+            "targetRequirement": {
+                "cardType": ["hero", "item", "magic"],
+                "eligibility": "opponent"
+            },
+            "requirement": {
+                "cardType": "hero",
+                "class": "berserker",
+                "eligibility": "self"
+            },
+            "effects": [
+                {
+                    "action": "INITIATE_CHALLENGE",
+                    "cost": "DISCARD_SELF"
+                },
+                {
+                    "action": "MODIFY_ROLL",
+                    "amount": 3
+                }
+            ]
+        }
+    }
+}

@@ -52,7 +52,7 @@
         "choices": [
             {
                 "label": "+3",
-                "effects": [{ "action": "MODIFY_ROLL", "amount": 3 }],
+                "effects": [{ "action": "MODIFY_ROLL", "amount": 3 }]
             },
             {
                 "label": "-1",
