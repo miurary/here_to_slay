@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const cardsDir = join(__dirname, 'cards');
 
-type CardTemplate = { id: string; type: string; [key: string]: any };
+type CardTemplate = { id: string; type: string; name: string; [key: string]: any };
 
 const shuffle = <T>(items: T[]): T[] => {
   return items.slice().sort(() => Math.random() - 0.5);
@@ -110,7 +110,15 @@ const gameState: GameState = {
   discardedMonsters: [],
   discardPile: [],
   cardTemplates: loadAllCardTemplates(),
-  diceRolls: {}
+  diceRolls: {},
+  availablePartyLeaderCards: [],
+  partyLeaderSelectionOrder: [],
+  currentSelectionPlayerId: undefined,
+  rollWinnerId: undefined,
+  lobbyLeaderId: undefined,
+  currentRollerId: undefined,
+  firstPlayerId: undefined,
+  targetMonstersToWin: undefined
 };
 
 io.on('connection', (socket: Socket) => {
@@ -119,6 +127,7 @@ io.on('connection', (socket: Socket) => {
     id: socket.id,
     username: undefined,
     actionPoints: 3,
+    partyLeaderId: undefined,
     zones: {
       hand: [],
       party: [],
@@ -160,6 +169,7 @@ io.on('connection', (socket: Socket) => {
     const playerIds = Object.keys(gameState.players);
     for (const playerId of playerIds) {
       const player = gameState.players[playerId];
+      if (!player) continue;
       const cards = drawCards(gameState.mainDeck, 5);
       player.zones.hand.push(...cards);
     }
@@ -167,8 +177,54 @@ io.on('connection', (socket: Socket) => {
     // Transition to rolling phase and set first roller
     gameState.status = 'rolling';
     gameState.diceRolls = {};
-    gameState.currentRollerId = playerIds[0];
+    gameState.availablePartyLeaderCards = [];
+    gameState.partyLeaderSelectionOrder = [];
+    gameState.currentSelectionPlayerId = undefined;
+    gameState.currentRollerId = playerIds[0] ?? undefined;
     gameState.turnNumber = 0;
+
+    io.emit('stateUpdate', gameState);
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
+  socket.on('drawFromMain', () => {
+    // Only allow drawing during the main game
+    console.log("Drawing from main...");
+    if (gameState.status !== 'in_progress') {
+      socket.emit('actionFailed', 'Cannot draw now.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    // Only active player may draw
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn to draw.');
+      return;
+    }
+
+    // Cost: 1 AP
+    if ((player.actionPoints ?? 0) < 1) {
+      socket.emit('actionFailed', 'Not enough AP to draw a card.');
+      return;
+    }
+
+    if (gameState.mainDeck.length === 0) {
+      socket.emit('actionFailed', 'No cards to draw.')
+      return;
+    }
+
+    console.log("Drawing a card for player:", player.username);
+    const card = drawCards(gameState.mainDeck, 1)[0];
+    console.log(`Card drawn: ${card?.templateId}`);
+    if (!card) return;
+
+    player.zones.hand.push(card);
+    player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    // Notify the drawer so the client can play a draw animation
+    socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
 
     io.emit('stateUpdate', gameState);
     io.emit('playersUpdated', Object.values(gameState.players));
@@ -192,16 +248,13 @@ io.on('connection', (socket: Socket) => {
     gameState.diceRolls[socket.id] = total;
     console.log(`${socket.id} rolled: ${die1} + ${die2} = ${total}`);
 
-    // Move to next roller
     const playerIds = Object.keys(gameState.players);
     const rolledPlayerIds = Object.keys(gameState.diceRolls);
     const nextRollerIndex = playerIds.findIndex(id => !rolledPlayerIds.includes(id));
 
     if (nextRollerIndex >= 0) {
-      // There are more players to roll
-      gameState.currentRollerId = playerIds[nextRollerIndex];
+      gameState.currentRollerId = playerIds[nextRollerIndex] ?? undefined;
     } else {
-      // All players have rolled - determine winner
       let maxRoll = 0;
       let winnerId = '';
 
@@ -215,10 +268,113 @@ io.on('connection', (socket: Socket) => {
       gameState.activePlayerId = winnerId;
       gameState.firstPlayerId = winnerId;
       gameState.currentRollerId = undefined;
+      gameState.rollWinnerId = winnerId;
       gameState.turnNumber = 1;
       gameState.phase = 'DRAW';
-      gameState.status = 'in_progress';
+      gameState.status = 'roll_complete';
+    }
+
+    io.emit('stateUpdate', gameState);
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
+  socket.on('continueGame', () => {
+    if (gameState.status !== 'roll_complete' && gameState.status !== 'party_leader_review') {
+      return;
+    }
+
+    if (socket.id !== gameState.lobbyLeaderId) {
+      return;
+    }
+
+    if (gameState.status === 'roll_complete') {
+      const allPlayerIds = Object.keys(gameState.players);
+      const firstPlayer = gameState.firstPlayerId ?? allPlayerIds[0] ?? '';
+      const selectionOrder = firstPlayer
+        ? [firstPlayer, ...allPlayerIds.filter((id) => id !== firstPlayer)]
+        : [...allPlayerIds];
+
+      gameState.status = 'party_leader_selection';
+      gameState.availablePartyLeaderCards = [...gameState.partyLeaderDeck];
+      gameState.partyLeaderSelectionOrder = selectionOrder;
+      gameState.currentSelectionPlayerId = selectionOrder[0];
       gameState.diceRolls = {};
+    } else {
+      gameState.status = 'in_progress';
+      gameState.activePlayerId = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
+      // Initialize AP for all players when entering the main game
+      for (const pid of Object.keys(gameState.players)) {
+        const p = gameState.players[pid];
+        if (!p) continue;
+        p.actionPoints = 3;
+      }
+    }
+
+    io.emit('stateUpdate', gameState);
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
+  socket.on('endTurn', () => {
+    if (gameState.status !== 'in_progress') return;
+    if (socket.id !== gameState.activePlayerId) return;
+
+    const playerIds = Object.keys(gameState.players);
+    if (playerIds.length === 0) return;
+
+    const currentIndex = playerIds.findIndex((id) => id === socket.id);
+    const nextIndex = (currentIndex + 1) % playerIds.length;
+    const nextPlayerId = playerIds[nextIndex] ?? '';
+
+    gameState.activePlayerId = nextPlayerId;
+    gameState.turnNumber = (gameState.turnNumber ?? 0) + 1;
+
+    // Reset AP for the next player
+    const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
+    if (nextPlayer) nextPlayer.actionPoints = 3;
+
+    io.emit('stateUpdate', gameState);
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
+  socket.on('choosePartyLeader', (instanceId) => {
+    if (gameState.status !== 'party_leader_selection') {
+      return;
+    }
+
+    if (socket.id !== gameState.currentSelectionPlayerId) {
+      return;
+    }
+
+    const cardIndex = gameState.availablePartyLeaderCards.findIndex(
+      (card) => card.instanceId === instanceId
+    );
+
+    if (cardIndex === -1) {
+      return;
+    }
+
+    const chosenCard = gameState.availablePartyLeaderCards.splice(cardIndex, 1)[0];
+    if (!chosenCard) {
+      return;
+    }
+    const player = gameState.players[socket.id];
+    if (!player) {
+      return;
+    }
+
+    player.zones.party = [chosenCard];
+
+    const allPlayerIds = Object.keys(gameState.players);
+    const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
+      (id) => id === socket.id
+    );
+    const nextIndex = currentIndex + 1;
+
+    if (nextIndex < gameState.partyLeaderSelectionOrder.length) {
+      gameState.currentSelectionPlayerId = gameState.partyLeaderSelectionOrder[nextIndex];
+    } else {
+      gameState.currentSelectionPlayerId = undefined;
+      gameState.status = 'party_leader_review';
     }
 
     io.emit('stateUpdate', gameState);
@@ -226,27 +382,28 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('quitGame', () => {
-    if (gameState.status !== 'in_progress') {
-      return;
-    }
-
-    // Reset game state back to waiting
     gameState.status = 'waiting';
+    gameState.activePlayerId = gameState.lobbyLeaderId || '';
     gameState.turnNumber = 0;
     gameState.phase = 'DRAW';
-    gameState.activePlayerId = Object.keys(gameState.players)[0] || '';
-    gameState.firstPlayerId = undefined;
+    gameState.stack = [];
     gameState.monsterDeck = [];
     gameState.partyLeaderDeck = [];
     gameState.mainDeck = [];
     gameState.activeMonsters = [];
     gameState.discardedMonsters = [];
     gameState.discardPile = [];
-    gameState.stack = [];
+    gameState.diceRolls = {};
+    gameState.currentRollerId = undefined;
+    gameState.firstPlayerId = undefined;
+    gameState.rollWinnerId = undefined;
+    gameState.availablePartyLeaderCards = [];
+    gameState.partyLeaderSelectionOrder = [];
+    gameState.currentSelectionPlayerId = undefined;
 
-    // Reset player hands and zones
     for (const playerId of Object.keys(gameState.players)) {
       const player = gameState.players[playerId];
+      if (!player) continue;
       player.zones.hand = [];
       player.zones.party = [];
       player.zones.discardPile = [];
@@ -274,9 +431,12 @@ io.on('connection', (socket: Socket) => {
       gameState.players[socket.id] = {
         id: socket.id,
         username: username,
+        actionPoints: 3,
+        partyLeaderId: undefined,
         zones: {
           hand: [],
-          party: []
+          party: [],
+          discardPile: []
         }
       };
     }
@@ -286,12 +446,18 @@ io.on('connection', (socket: Socket) => {
   socket.on('disconnect', () => {
     console.log(`Player disconnected: ${socket.id}`);
 
+    const wasLobbyLeader = socket.id === gameState.lobbyLeaderId;
     delete gameState.players[socket.id];
 
     if (gameState.activePlayerId === socket.id) {
       gameState.activePlayerId = Object.keys(gameState.players)[0] ?? '';
     }
 
+    if (wasLobbyLeader) {
+      gameState.lobbyLeaderId = Object.keys(gameState.players)[0] ?? undefined;
+    }
+
+    io.emit('stateUpdate', gameState);
     io.emit('playersUpdated', Object.values(gameState.players));
   });
 });
