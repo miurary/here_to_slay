@@ -4,7 +4,7 @@
         "name": "Sealing Key",
         "type": "item",
         "subtype": "cursed",
-        "text": "You cannot use the equipped Hero card's effect.",
+        "abilityText": "You cannot use the equipped Hero card's effect.",
         "playTarget": "hero",
         "passiveModifiers": [
             { "stat": "heroEffectLocked", "value": true}
@@ -15,7 +15,7 @@
         "name": "Curse of the Snake's Eyes",
         "type": "item",
         "subtype": "cursed",
-        "text": "Each time you roll to use the equipped Hero card's effect, -2 to your roll.",
+        "abilityText": "Each time you roll to use the equipped Hero card's effect, -2 to your roll.",
         "playTarget": "hero",
         "trigger": {
             "event": "ON_HERO_ROLL_ATTEMPT",
@@ -31,7 +31,7 @@
         "name": "Dragon's Bile",
         "type": "item",
         "subtype": "cursed",
-        "text": "If you unsuccessfully roll to use the equipped Hero card's effect, SACRIFICE a Hero card.",
+        "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, SACRIFICE a Hero card.",
         "playTarget": "hero",
         "trigger": {
             "event": "ON_HERO_ROLL_FAIL",
@@ -47,7 +47,7 @@
         "name": "Suspiciously Shiny Coin",
         "type": "item",
         "subtype": "cursed",
-        "text": "If you successfully roll to use the equipped Hero card's effect, DISCARD a card.",
+        "abilityText": "If you successfully roll to use the equipped Hero card's effect, DISCARD a card.",
         "playTarget": "hero",
         "trigger": {
             "event": "ON_HERO_ROLL_SUCCESS",

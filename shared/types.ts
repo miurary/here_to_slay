@@ -1,6 +1,9 @@
 export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
+  startGame: () => void;
+  rollForFirst: () => void;
+  quitGame: () => void;
 }
 
 export interface ServerToClientEvents {
@@ -10,10 +13,18 @@ export interface ServerToClientEvents {
 }
 
 // need to fix clanker code
-export type GameStatus = 'waiting' | 'in_progress' | 'finished';
+export type GameStatus = 'waiting' | 'rolling' | 'in_progress' | 'finished';
 export type GamePhase = 'DRAW' | 'MAIN' | 'COMBAT' | 'RESOLUTION' | 'END';
 export type CardType = 'hero' | 'item' | 'magic' | 'modifier' | 'challenge' | 'monster' | 'party_leader';
 export type EffectType = 'damage' | 'heal' | 'draw' | 'buff' | 'challenge' | 'destroy' | 'steal' | 'sacrifice';
+
+export interface CardTemplate {
+  id: string;
+  name: string;
+  type: string;
+  class?: string;
+  [key: string]: unknown;
+}
 
 // need to fix clanker code
 export interface GameState {
@@ -24,17 +35,23 @@ export interface GameState {
   phase: GamePhase;
   players: Record<string, PlayerState>;
   stack: StackAction[];
-  monsterDeckCount: number;
+  monsterDeck: CardInstance[];
+  partyLeaderDeck: CardInstance[];
+  mainDeck: CardInstance[];
   activeMonsters: MonsterInstance[];
   discardedMonsters: CardInstance[];
+  discardPile: CardInstance[];
+  cardTemplates: Record<string, CardTemplate>;
+  diceRolls: Record<string, number>;
+  lobbyLeaderId?: string;
+  currentRollerId?: string;
   firstPlayerId?: string;
   targetMonstersToWin?: number;
 }
-
 // need to fix clanker code
 export interface PlayerState {
   id: string;
-  username: string?;
+  username?: string;
   actionPoints: number;
   partyLeaderId?: string;
   zones: {

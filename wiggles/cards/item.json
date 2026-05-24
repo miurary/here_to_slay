@@ -3,7 +3,7 @@
         "id": "i_001",
         "name": "Goblet of Caffeination",
         "type": "item",
-        "abilityText": "If you unsuccessfully roll to usse the equipped Hero card's effect, you may SACRIFICE this card, then roll to use that effect again immediately.",
+        "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, you may SACRIFICE this card, then roll to use that effect again immediately.",
         "playTarget": "hero",
         "trigger": {
             "event": "ON_HERO_ROLL_FAIL",
