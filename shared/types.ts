@@ -5,6 +5,7 @@ export interface ClientToServerEvents {
   rollForFirst: () => void;
   continueGame: () => void;
   choosePartyLeader: (instanceId: string) => void;
+  playHero: (instanceId: string) => void;
   drawFromMain: () => void;
   endTurn: () => void;
   quitGame: () => void;

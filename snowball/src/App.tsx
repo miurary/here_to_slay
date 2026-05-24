@@ -17,6 +17,7 @@ export default function App() {
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [justDrew, setJustDrew] = useState(false);
+  const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
 
   // Explicitly tell React this state will hold a string
   const [status, setStatus] = useState<string>('Connecting...');
@@ -104,6 +105,15 @@ export default function App() {
     socket.emit('endTurn');
   };
 
+  const handlePlayHero = (instanceId: string) => {
+    if (!gameState || gameState.status !== 'in_progress') {
+      return;
+    }
+
+    socket.emit('playHero', instanceId);
+    setSelectedHeroId(null);
+  };
+
   const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!name.trim()) {
@@ -115,31 +125,44 @@ export default function App() {
     setStatus(`Username set to ${name.trim()}`);
   };
 
+  const selectedHero = gameState?.players[myId]?.zones.hand.find((card) => card.instanceId === selectedHeroId);
+  const selectedHeroAP = selectedHero ? gameState?.players[myId]?.actionPoints ?? 0 : 0;
+
   return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>Here to Slay Online</h1>
-      <p>Status: <strong>{status}</strong></p>
+    <div
+      style={{ minHeight: '100vh', padding: '1.5rem', fontFamily: 'sans-serif', backgroundColor: '#eef2f6' }}
+      onClick={() => setSelectedHeroId(null)}
+    >
+      <div style={{ maxWidth: '1800px', margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div>
+          <h1>Here to Slay Online</h1>
+          <p>Status: <strong>{status}</strong></p>
+        </div>
 
-      <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
-        <label htmlFor="username" style={{ display: 'block', marginBottom: '0.5rem' }}>
-          Enter your username:
-        </label>
-        <input
-          id="username"
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Username"
-          style={{ padding: '0.5rem', fontSize: '1rem', width: '100%', maxWidth: '320px', boxSizing: 'border-box' }}
-        />
-        <button
-          type="submit"
-          style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', fontSize: '1rem' }}
-        >
-          Save Username
-        </button>
-      </form>
+        <div>
+          <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
+            <label htmlFor="username" style={{ display: 'block', marginBottom: '0.5rem' }}>
+              Enter your username:
+            </label>
+            <input
+              id="username"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Username"
+              style={{ padding: '0.5rem', fontSize: '1rem', width: '100%', maxWidth: '320px', boxSizing: 'border-box' }}
+            />
+            <button
+              type="submit"
+              style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', fontSize: '1rem' }}
+            >
+              Save Username
+            </button>
+          </form>
+        </div>
 
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minHeight: 'calc(100vh - 260px)' }}>
+          <main style={{ flex: 1, minWidth: 0 }}>
       {gameState?.status === 'waiting' && gameState?.lobbyLeaderId === myId && (
         <button
           type="button"
@@ -359,6 +382,48 @@ export default function App() {
             })}
           </div>
 
+          <div style={{ marginBottom: '1.5rem' }}>
+            <h3>Revealed Monsters</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
+              {gameState.activeMonsters.map((monster) => {
+                const template = gameState.cardTemplates[monster.templateId];
+                const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
+                const requirementText = requirements.length > 0
+                  ? requirements.map((req) => `${req.amount ?? '?'} ${req.class ?? 'Any'}`).join(', ')
+                  : 'No requirements';
+                const lowerBound = template?.lowerBound as number | undefined;
+                const lowerBoundText = template?.lowerBoundText as string | undefined;
+                const upperBound = template?.upperBound as number | undefined;
+                const upperBoundText = template?.upperBoundText as string | undefined;
+                const slainEffectText = template?.slainEffectText as string | undefined;
+
+                return (
+                  <div key={monster.instanceId} style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{template?.name || monster.templateId}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.75rem' }}>{requirementText}</div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                      <span style={{ fontWeight: 'bold' }}>{lowerBound !== undefined ? `${lowerBound}-` : 'Lower:'}</span>
+                      <span style={{ fontSize: '0.85rem', color: '#333' }}>{lowerBoundText ?? 'No lower bound text'}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: 'bold' }}>{upperBound !== undefined ? `${upperBound}+` : 'Upper:'}</span>
+                      <span style={{ fontSize: '0.85rem', color: '#333' }}>{upperBoundText ?? 'No upper bound text'}</span>
+                    </div>
+
+                    {slainEffectText && (
+                      <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '6px', backgroundColor: '#f8f0ff', color: '#333' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Slain Effect</div>
+                        <div style={{ fontSize: '0.8rem' }}>{slainEffectText}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {gameState.lobbyLeaderId === myId ? (
             <button
               type="button"
@@ -405,7 +470,7 @@ export default function App() {
 
       {gameState && gameState.status === 'in_progress' && gameState.players[myId] && (
         <>
-          <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+          <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {gameState.players[myId].zones.party[0] && (() => {
               const partyLeader = gameState.players[myId].zones.party[0];
               const template = gameState.cardTemplates[partyLeader.templateId];
@@ -423,7 +488,28 @@ export default function App() {
               );
             })()}
 
-            <div style={{ flex: 1, padding: '1rem', border: '1px solid #ccc', borderRadius: '4px', backgroundColor: '#fff' }}>
+            <div style={{ width: '260px', padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: '#fff' }}>
+              <h3 style={{ marginTop: 0 }}>Your Party</h3>
+              <div style={{ minHeight: '120px', display: 'grid', gap: '0.75rem' }}>
+                {gameState.players[myId].zones.party.filter((card) => card.cardType === 'hero').length > 0 ? (
+                  gameState.players[myId].zones.party
+                    .filter((card) => card.cardType === 'hero')
+                    .map((card) => {
+                      const template = gameState.cardTemplates[card.templateId];
+                      return (
+                        <div key={card.instanceId} style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff' }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
+                          <div style={{ fontSize: '0.8rem', color: '#666' }}>{template?.class || 'Hero'}</div>
+                        </div>
+                      );
+                    })
+                ) : (
+                  <div style={{ color: '#666' }}>Play hero cards from your hand to your party.</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minWidth: '320px', padding: '1rem', border: '1px solid #ccc', borderRadius: '4px', backgroundColor: '#fff' }}>
               <h3>Your Hand ({gameState.players[myId].zones.hand.length} cards)</h3>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {gameState.players[myId].zones.hand.map((card) => {
@@ -435,14 +521,21 @@ export default function App() {
                   return (
                     <div
                       key={card.instanceId}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (card.cardType === 'hero') {
+                          setSelectedHeroId(card.instanceId);
+                        }
+                      }}
                       style={{
-                        border: '1px solid #333',
+                        border: selectedHeroId === card.instanceId ? '2px solid #007bff' : '1px solid #333',
                         borderRadius: '4px',
                         padding: '0.75rem',
                         minWidth: '120px',
                         maxWidth: '150px',
-                        backgroundColor: '#f0f0f0',
+                        backgroundColor: selectedHeroId === card.instanceId ? '#e7f3ff' : '#f0f0f0',
                         textAlign: 'center',
+                        cursor: card.cardType === 'hero' ? 'pointer' : 'default',
                       }}
                     >
                       <div style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{cardName}</div>
@@ -466,6 +559,80 @@ export default function App() {
                       {abilityText && (
                         <div style={{ fontSize: '0.65rem', color: '#333', marginTop: '0.5rem', fontStyle: 'italic', lineHeight: '1.3' }}>
                           {abilityText}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedHero && (
+                <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #007bff', borderRadius: '8px', backgroundColor: '#e7f3ff' }}>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <strong>Selected Hero:</strong> {selectedHero ? gameState.cardTemplates[selectedHero.templateId]?.name || 'Hero' : 'None'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handlePlayHero(selectedHero.instanceId);
+                    }}
+                    disabled={selectedHeroAP < 1}
+                    style={{
+                      padding: '0.75rem 1.25rem',
+                      fontSize: '1rem',
+                      backgroundColor: selectedHeroAP < 1 ? '#ccc' : '#007bff',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: selectedHeroAP < 1 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Play Hero (-1 AP)
+                  </button>
+                  {selectedHeroAP < 1 && (
+                    <div style={{ marginTop: '0.75rem', color: '#c00' }}>
+                      You need at least 1 AP to play this hero.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: '#fdf9f1' }}>
+              <h3>Active Monsters</h3>
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                {gameState.activeMonsters.map((monster) => {
+                  const template = gameState.cardTemplates[monster.templateId];
+                  const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
+                  const requirementText = requirements.length > 0
+                    ? requirements.map((req) => `${req.amount ?? '?'} ${req.class ?? 'Any'}`).join(', ')
+                    : 'No requirements';
+                  const lowerBound = template?.lowerBound as number | undefined;
+                  const lowerBoundText = template?.lowerBoundText as string | undefined;
+                  const upperBound = template?.upperBound as number | undefined;
+                  const upperBoundText = template?.upperBoundText as string | undefined;
+                  const slainEffectText = template?.slainEffectText as string | undefined;
+
+                  return (
+                    <div key={monster.instanceId} style={{ padding: '0.75rem', border: '1px solid #aaa', borderRadius: '8px', backgroundColor: 'white' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '0.35rem' }}>{template?.name || monster.templateId}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem' }}>{requirementText}</div>
+
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                        <span style={{ fontWeight: 'bold' }}>{lowerBound !== undefined ? `${lowerBound}-` : 'Lower:'}</span>
+                        <span style={{ fontSize: '0.85rem', color: '#333' }}>{lowerBoundText ?? 'No lower bound text'}</span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <span style={{ fontWeight: 'bold' }}>{upperBound !== undefined ? `${upperBound}+` : 'Upper:'}</span>
+                        <span style={{ fontSize: '0.85rem', color: '#333' }}>{upperBoundText ?? 'No upper bound text'}</span>
+                      </div>
+
+                      {slainEffectText && (
+                        <div style={{ fontSize: '0.8rem', color: '#333', backgroundColor: '#fff8e1', padding: '0.75rem', borderRadius: '6px' }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Slain Effect</div>
+                          {slainEffectText}
                         </div>
                       )}
                     </div>
@@ -536,44 +703,88 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{ marginBottom: '2rem', padding: '1rem', border: '1px solid #bbb', borderRadius: '8px', backgroundColor: '#f7f7ff' }}>
-            <h3>Opponents' Party Leaders</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-              {Object.values(gameState.players)
-                .filter((player) => player.id !== myId)
-                .map((player) => {
-                  const chosen = player.zones.party[0];
-                  const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
-                  return (
-                    <div key={player.id} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{player.username || 'Player'}</div>
-                      {chosen ? (
-                        <>
-                          <div style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>{template?.name || chosen.templateId}</div>
-                          <div style={{ fontSize: '0.8rem', color: '#666' }}>{chosen.cardType}</div>
-                        </>
-                      ) : (
-                        <div style={{ color: '#999' }}>No leader chosen</div>
-                      )}
-                      <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#333' }}>
-                        Hand size: {player.zones.hand.length}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
         </>
       )}
 
-      <h3>Players Connected</h3>
-      {players.length === 0 ? (
-        <p>No players connected yet.</p>
-      ) : (
-        players.map((player) => (
-          <p key={player.id}>{player.username || player.id}</p>
-        ))
-      )}
+          </main>
+
+          <aside style={{ width: '360px', display: 'flex', flexDirection: 'column', gap: '1rem', flexShrink: 0 }}>
+            {gameState?.status === 'in_progress' && (
+              <>
+                <div style={{ padding: '1rem', border: '1px solid #bbb', borderRadius: '8px', backgroundColor: 'white' }}>
+                  <h3>Active Monsters</h3>
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {gameState.activeMonsters.map((monster) => {
+                      const template = gameState.cardTemplates[monster.templateId];
+                      const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
+                      const requirementText = requirements.length > 0
+                        ? requirements.map((req) => `${req.amount ?? '?'} ${req.class ?? 'Any'}`).join(', ')
+                        : 'No requirements';
+                      const lowerBound = template?.lowerBound as number | undefined;
+                      const lowerBoundText = template?.lowerBoundText as string | undefined;
+                      const upperBound = template?.upperBound as number | undefined;
+                      const upperBoundText = template?.upperBoundText as string | undefined;
+                      return (
+                        <div key={monster.instanceId} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fafafa' }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || monster.templateId}</div>
+                          <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>{requirementText}</div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                            <span style={{ fontWeight: 'bold' }}>{lowerBound !== undefined ? `${lowerBound}-` : 'Lower:'}</span>
+                            <span style={{ fontSize: '0.85rem', color: '#333' }}>{lowerBoundText ?? 'No lower bound text'}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                            <span style={{ fontWeight: 'bold' }}>{upperBound !== undefined ? `${upperBound}-` : 'Upper:'}</span>
+                            <span style={{ fontSize: '0.85rem', color: '#333' }}>{upperBoundText ?? 'No upper bound text'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ padding: '1rem', border: '1px solid #bbb', borderRadius: '8px', backgroundColor: 'white' }}>
+                  <h3>Opponents' Party Leaders</h3>
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {Object.values(gameState.players)
+                      .filter((player) => player.id !== myId)
+                      .map((player) => {
+                        const chosen = player.zones.party[0];
+                        const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
+                        return (
+                          <div key={player.id} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fafafa' }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
+                            {chosen ? (
+                              <>
+                                <div style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>{template?.name || chosen.templateId}</div>
+                                <div style={{ fontSize: '0.8rem', color: '#666' }}>{chosen.cardType}</div>
+                              </>
+                            ) : (
+                              <div style={{ color: '#999' }}>No leader chosen</div>
+                            )}
+                            <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#333' }}>
+                              Hand size: {player.zones.hand.length}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
+              <h3>Players Connected</h3>
+              {players.length === 0 ? (
+                <p>No players connected yet.</p>
+              ) : (
+                players.map((player) => (
+                  <p key={player.id}>{player.username || player.id}</p>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      </div>
     </div>
   );
 }

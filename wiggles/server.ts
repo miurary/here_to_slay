@@ -230,6 +230,51 @@ io.on('connection', (socket: Socket) => {
     io.emit('playersUpdated', Object.values(gameState.players));
   });
 
+  socket.on('playHero', (instanceId) => {
+    if (gameState.status !== 'in_progress') {
+      socket.emit('actionFailed', 'Cannot play hero now.');
+      return;
+    }
+
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    if ((player.actionPoints ?? 0) < 1) {
+      socket.emit('actionFailed', 'Not enough AP to play a hero.');
+      return;
+    }
+
+    const cardIndex = player.zones.hand.findIndex((card) => card.instanceId === instanceId);
+    if (cardIndex === -1) {
+      socket.emit('actionFailed', 'Hero card not found in hand.');
+      return;
+    }
+
+    const card = player.zones.hand[cardIndex];
+    if (!card || card.cardType !== 'hero') {
+      socket.emit('actionFailed', 'Only hero cards can be played to your party.');
+      return;
+    }
+
+    const playedCards = player.zones.hand.splice(cardIndex, 1);
+    const playedCard = playedCards[0];
+    if (!playedCard) {
+      socket.emit('actionFailed', 'Failed to play hero card.');
+      return;
+    }
+
+    player.zones.party.push(playedCard);
+    player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    io.emit('stateUpdate', gameState);
+    io.emit('playersUpdated', Object.values(gameState.players));
+  });
+
   socket.on('rollForFirst', () => {
     if (gameState.status !== 'rolling' || !gameState.currentRollerId) {
       return;
@@ -375,6 +420,9 @@ io.on('connection', (socket: Socket) => {
     } else {
       gameState.currentSelectionPlayerId = undefined;
       gameState.status = 'party_leader_review';
+      if (gameState.activeMonsters.length === 0) {
+        gameState.activeMonsters = drawCards(gameState.monsterDeck, 3) as MonsterInstance[];
+      }
     }
 
     io.emit('stateUpdate', gameState);
