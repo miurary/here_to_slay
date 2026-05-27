@@ -6,6 +6,8 @@ export interface ClientToServerEvents {
   continueGame: () => void;
   choosePartyLeader: (instanceId: string) => void;
   playHero: (instanceId: string) => void;
+  playItem: (itemInstanceId: string, targetHeroInstanceId: string) => void;
+  playCursedItem: (itemInstanceId: string, targetPlayerId: string, targetHeroInstanceId: string) => void;
   drawFromMain: () => void;
   endTurn: () => void;
   quitGame: () => void;

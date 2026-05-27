@@ -84,19 +84,17 @@ const loadAllCardTemplates = (): Record<string, CardTemplate> => {
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
-const httpServer = createServer(app);
+const rooms: Record<string, GameState> = {};
 
-// Apply the types to the Socket Server
-const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-  cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"]
-  }
-});
+const generateRoomCode = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+};
 
-const gameState: GameState = {
-  gameId: 'game-1',
+const createInitialGameState = (roomCode: string): GameState => ({
+  gameId: roomCode,
   status: 'waiting',
   activePlayerId: '',
   turnNumber: 0,
@@ -119,36 +117,85 @@ const gameState: GameState = {
   currentRollerId: undefined,
   firstPlayerId: undefined,
   targetMonstersToWin: undefined
-};
+});
+
+const getRoomState = (roomCode?: string) => roomCode ? rooms[roomCode] : undefined;
+
+app.post('/api/create-room', (_req, res) => {
+  let roomCode = generateRoomCode();
+  while (rooms[roomCode]) {
+    roomCode = generateRoomCode();
+  }
+  rooms[roomCode] = createInitialGameState(roomCode);
+  res.json({ roomCode });
+});
+
+app.get('/api/room/:roomCode', (req, res) => {
+  const roomCode = req.params.roomCode?.toUpperCase();
+  res.json({ exists: Boolean(getRoomState(roomCode)) });
+});
+
+const httpServer = createServer(app);
+
+// Apply the types to the Socket Server
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  cors: {
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST"]
+  }
+});
 
 io.on('connection', (socket: Socket) => {
-  console.log(`Player connected: ${socket.id}`);
-  gameState.players[socket.id] = {
-    id: socket.id,
-    username: undefined,
-    actionPoints: 3,
-    partyLeaderId: undefined,
-    zones: {
-      hand: [],
-      party: [],
-      discardPile: []
-    }
-  };
+  const roomCode = (socket.handshake.auth.roomCode as string | undefined)?.toUpperCase();
+  const username = socket.handshake.auth.username as string | undefined;
+  const gameState = getRoomState(roomCode);
+
+  if (!roomCode || !gameState) {
+    socket.emit('actionFailed', 'Room not found or room code missing.');
+    socket.disconnect();
+    return;
+  }
+
+  socket.data.roomCode = roomCode;
+  socket.join(roomCode);
+
+  const player = gameState.players[socket.id];
+  if (!player) {
+    gameState.players[socket.id] = {
+      id: socket.id,
+      username,
+      actionPoints: 3,
+      partyLeaderId: undefined,
+      zones: {
+        hand: [],
+        party: [],
+        discardPile: []
+      }
+    };
+  } else if (username) {
+    player.username = username;
+  }
 
   if (!gameState.activePlayerId) {
     gameState.activePlayerId = socket.id;
   }
 
-  // First player to connect becomes lobby leader
   if (!gameState.lobbyLeaderId) {
     gameState.lobbyLeaderId = socket.id;
   }
 
-  socket.emit('stateUpdate', gameState);
-  io.emit('playersUpdated', Object.values(gameState.players));
+  const sendRoomUpdate = () => {
+    const current = getRoomState(roomCode);
+    if (!current) return;
+    io.to(roomCode).emit('stateUpdate', current);
+    io.to(roomCode).emit('playersUpdated', Object.values(current.players));
+  };
+
+  sendRoomUpdate();
 
   socket.on('startGame', () => {
-    if (gameState.status !== 'waiting') {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'waiting') {
       return;
     }
 
@@ -156,7 +203,6 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    // Initialize decks
     const { monsterDeck, partyLeaderDeck, mainDeck } = initializeDecks();
     gameState.monsterDeck = monsterDeck;
     gameState.partyLeaderDeck = partyLeaderDeck;
@@ -165,7 +211,6 @@ io.on('connection', (socket: Socket) => {
     gameState.discardedMonsters = [];
     gameState.activeMonsters = drawCards(gameState.monsterDeck, 3) as MonsterInstance[];
 
-    // Draw initial cards for each player
     const playerIds = Object.keys(gameState.players);
     for (const playerId of playerIds) {
       const player = gameState.players[playerId];
@@ -174,7 +219,6 @@ io.on('connection', (socket: Socket) => {
       player.zones.hand.push(...cards);
     }
 
-    // Transition to rolling phase and set first roller
     gameState.status = 'rolling';
     gameState.diceRolls = {};
     gameState.availablePartyLeaderCards = [];
@@ -183,13 +227,13 @@ io.on('connection', (socket: Socket) => {
     gameState.currentRollerId = playerIds[0] ?? undefined;
     gameState.turnNumber = 0;
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('drawFromMain', () => {
-    // Only allow drawing during the main game
-    console.log("Drawing from main...");
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
     if (gameState.status !== 'in_progress') {
       socket.emit('actionFailed', 'Cannot draw now.');
       return;
@@ -198,39 +242,35 @@ io.on('connection', (socket: Socket) => {
     const player = gameState.players[socket.id];
     if (!player) return;
 
-    // Only active player may draw
     if (socket.id !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn to draw.');
       return;
     }
 
-    // Cost: 1 AP
     if ((player.actionPoints ?? 0) < 1) {
       socket.emit('actionFailed', 'Not enough AP to draw a card.');
       return;
     }
 
     if (gameState.mainDeck.length === 0) {
-      socket.emit('actionFailed', 'No cards to draw.')
+      socket.emit('actionFailed', 'No cards to draw.');
       return;
     }
 
-    console.log("Drawing a card for player:", player.username);
     const card = drawCards(gameState.mainDeck, 1)[0];
-    console.log(`Card drawn: ${card?.templateId}`);
     if (!card) return;
 
     player.zones.hand.push(card);
     player.actionPoints = (player.actionPoints ?? 0) - 1;
 
-    // Notify the drawer so the client can play a draw animation
     socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
-
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('playHero', (instanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
     if (gameState.status !== 'in_progress') {
       socket.emit('actionFailed', 'Cannot play hero now.');
       return;
@@ -271,27 +311,161 @@ io.on('connection', (socket: Socket) => {
     player.zones.party.push(playedCard);
     player.actionPoints = (player.actionPoints ?? 0) - 1;
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
-  socket.on('rollForFirst', () => {
-    if (gameState.status !== 'rolling' || !gameState.currentRollerId) {
+  socket.on('playItem', (itemInstanceId, targetHeroInstanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
+    if (gameState.status !== 'in_progress') {
+      socket.emit('actionFailed', 'Cannot play item now.');
       return;
     }
 
-    // Only the current roller can roll
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    if ((player.actionPoints ?? 0) < 1) {
+      socket.emit('actionFailed', 'Not enough AP to play an item.');
+      return;
+    }
+
+    const itemIndex = player.zones.hand.findIndex((card) => card.instanceId === itemInstanceId);
+    if (itemIndex === -1) {
+      socket.emit('actionFailed', 'Item not found in hand.');
+      return;
+    }
+
+    const itemCard = player.zones.hand[itemIndex];
+    if (!itemCard || itemCard.cardType !== 'item') {
+      socket.emit('actionFailed', 'Only item cards can be equipped to heroes.');
+      return;
+    }
+
+    const itemTemplate = gameState.cardTemplates[itemCard.templateId];
+    if ((itemTemplate?.subtype as string | undefined)?.toLowerCase() === 'cursed') {
+      socket.emit('actionFailed', 'Cursed items must be played on opponents using the cursed item flow.');
+      return;
+    }
+
+    const targetHero = player.zones.party.find((card) => card.instanceId === targetHeroInstanceId);
+    if (!targetHero) {
+      socket.emit('actionFailed', 'Target hero not found in your party.');
+      return;
+    }
+
+    if (targetHero.equippedItem) {
+      socket.emit('actionFailed', 'That hero already has an equipped item.');
+      return;
+    }
+
+    const [removedItems] = player.zones.hand.splice(itemIndex, 1);
+    if (!removedItems) {
+      socket.emit('actionFailed', 'Failed to remove item from hand.');
+      return;
+    }
+
+    targetHero.equippedItem = removedItems.instanceId;
+    player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    sendRoomUpdate();
+  });
+
+  socket.on('playCursedItem', (itemInstanceId, targetPlayerId, targetHeroInstanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
+    if (gameState.status !== 'in_progress') {
+      socket.emit('actionFailed', 'Cannot play cursed item now.');
+      return;
+    }
+
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+
+    if (socket.id === targetPlayerId) {
+      socket.emit('actionFailed', 'Cannot play cursed item on your own heroes.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    const targetPlayer = gameState.players[targetPlayerId];
+    if (!targetPlayer) {
+      socket.emit('actionFailed', 'Target player not found.');
+      return;
+    }
+
+    if ((player.actionPoints ?? 0) < 1) {
+      socket.emit('actionFailed', 'Not enough AP to play a cursed item.');
+      return;
+    }
+
+    const itemIndex = player.zones.hand.findIndex((card) => card.instanceId === itemInstanceId);
+    if (itemIndex === -1) {
+      socket.emit('actionFailed', 'Cursed item not found in hand.');
+      return;
+    }
+
+    const itemCard = player.zones.hand[itemIndex];
+    if (!itemCard || itemCard.cardType !== 'item') {
+      socket.emit('actionFailed', 'Only item cards can be equipped to heroes.');
+      return;
+    }
+
+    const itemTemplate = gameState.cardTemplates[itemCard.templateId];
+    if ((itemTemplate?.subtype as string | undefined)?.toLowerCase() !== 'cursed') {
+      socket.emit('actionFailed', 'Only cursed items can be played on opponent heroes.');
+      return;
+    }
+
+    const targetHero = targetPlayer.zones.party.find((card) => card.instanceId === targetHeroInstanceId);
+    if (!targetHero) {
+      socket.emit('actionFailed', 'Target hero not found in opponent\'s party.');
+      return;
+    }
+
+    if (targetHero.equippedItem) {
+      socket.emit('actionFailed', 'That hero already has an equipped item.');
+      return;
+    }
+
+    const [removedItems] = player.zones.hand.splice(itemIndex, 1);
+    if (!removedItems) {
+      socket.emit('actionFailed', 'Failed to remove cursed item from hand.');
+      return;
+    }
+
+    targetHero.equippedItem = removedItems.instanceId;
+    player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    sendRoomUpdate();
+  });
+
+  socket.on('rollForFirst', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'rolling' || !gameState.currentRollerId) {
+      return;
+    }
+
     if (socket.id !== gameState.currentRollerId) {
       return;
     }
 
-    // Roll two d6 dice
     const die1 = Math.floor(Math.random() * 6) + 1;
     const die2 = Math.floor(Math.random() * 6) + 1;
     const total = die1 + die2;
 
     gameState.diceRolls[socket.id] = total;
-    console.log(`${socket.id} rolled: ${die1} + ${die2} = ${total}`);
 
     const playerIds = Object.keys(gameState.players);
     const rolledPlayerIds = Object.keys(gameState.diceRolls);
@@ -319,11 +493,13 @@ io.on('connection', (socket: Socket) => {
       gameState.status = 'roll_complete';
     }
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('continueGame', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
     if (gameState.status !== 'roll_complete' && gameState.status !== 'party_leader_review') {
       return;
     }
@@ -347,7 +523,6 @@ io.on('connection', (socket: Socket) => {
     } else {
       gameState.status = 'in_progress';
       gameState.activePlayerId = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
-      // Initialize AP for all players when entering the main game
       for (const pid of Object.keys(gameState.players)) {
         const p = gameState.players[pid];
         if (!p) continue;
@@ -355,12 +530,12 @@ io.on('connection', (socket: Socket) => {
       }
     }
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('endTurn', () => {
-    if (gameState.status !== 'in_progress') return;
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'in_progress') return;
     if (socket.id !== gameState.activePlayerId) return;
 
     const playerIds = Object.keys(gameState.players);
@@ -373,16 +548,15 @@ io.on('connection', (socket: Socket) => {
     gameState.activePlayerId = nextPlayerId;
     gameState.turnNumber = (gameState.turnNumber ?? 0) + 1;
 
-    // Reset AP for the next player
     const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
     if (nextPlayer) nextPlayer.actionPoints = 3;
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('choosePartyLeader', (instanceId) => {
-    if (gameState.status !== 'party_leader_selection') {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'party_leader_selection') {
       return;
     }
 
@@ -409,7 +583,6 @@ io.on('connection', (socket: Socket) => {
 
     player.zones.party = [chosenCard];
 
-    const allPlayerIds = Object.keys(gameState.players);
     const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
       (id) => id === socket.id
     );
@@ -425,11 +598,13 @@ io.on('connection', (socket: Socket) => {
       }
     }
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
   socket.on('quitGame', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
     gameState.status = 'waiting';
     gameState.activePlayerId = gameState.lobbyLeaderId || '';
     gameState.turnNumber = 0;
@@ -459,40 +634,42 @@ io.on('connection', (socket: Socket) => {
       player.partyLeaderId = undefined;
     }
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    sendRoomUpdate();
   });
 
-  // TypeScript knows 'pingServer' is a valid event!
   socket.on('pingServer', () => {
-    console.log(`Ping received from ${socket.id}`);
-    
-    // TypeScript forces you to send an object with a 'message' string
-    socket.emit('pongClient', { message: "Connection successful!" });
+    socket.emit('pongClient', { message: 'Connection successful!' });
   });
 
   socket.on('setUsername', (username) => {
-    const player = gameState.players[socket.id];
-    if (player) {
-      player.username = username;
-    } else {
-      gameState.players[socket.id] = {
-        id: socket.id,
-        username: username,
-        actionPoints: 3,
-        partyLeaderId: undefined,
-        zones: {
-          hand: [],
-          party: [],
-          discardPile: []
-        }
-      };
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (gameState) {
+      const player = gameState.players[socket.id];
+      if (player) {
+        player.username = username;
+      } else {
+        gameState.players[socket.id] = {
+          id: socket.id,
+          username: username,
+          actionPoints: 3,
+          partyLeaderId: undefined,
+          zones: {
+            hand: [],
+            party: [],
+            discardPile: []
+          }
+        };
+      }
+      sendRoomUpdate();
     }
-    io.emit('playersUpdated', Object.values(gameState.players));
   });
 
   socket.on('disconnect', () => {
-    console.log(`Player disconnected: ${socket.id}`);
+    const roomCode = socket.data.roomCode as string | undefined;
+    if (!roomCode) return;
+
+    const gameState = getRoomState(roomCode);
+    if (!gameState) return;
 
     const wasLobbyLeader = socket.id === gameState.lobbyLeaderId;
     delete gameState.players[socket.id];
@@ -505,11 +682,16 @@ io.on('connection', (socket: Socket) => {
       gameState.lobbyLeaderId = Object.keys(gameState.players)[0] ?? undefined;
     }
 
-    io.emit('stateUpdate', gameState);
-    io.emit('playersUpdated', Object.values(gameState.players));
+    const room = io.sockets.adapter.rooms.get(roomCode);
+    const roomCount = room?.size ?? 0;
+    if (roomCount === 0) {
+      delete rooms[roomCode];
+      return;
+    }
+
+    sendRoomUpdate();
   });
 });
-
 const PORT = 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
