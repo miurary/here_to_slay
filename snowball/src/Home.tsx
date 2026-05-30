@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import UsernameCard from './components/UsernameCard';
 import './App.css';
 
 export default function Home() {
@@ -77,32 +78,12 @@ export default function Home() {
         <div style={{ maxWidth: '720px', margin: '0 auto' }}>
           <h1>Here to Slay Online</h1>
           <p>Start or join a room, then share the link with friends.</p>
-
-          <div className="panel" style={{ marginBottom: '1.5rem' }}>
-            <h2>Ready to play?</h2>
-            {nameSaved && name ? (
-              <div style={{ fontSize: '1rem', color: '#222' }}>
-                Welcome {name}!
-              </div>
-            ) : (
-              <>
-                <label htmlFor="name" style={{ display: 'block', marginBottom: '0.5rem' }}>
-                  Username
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="Enter a username"
-                  style={{ width: '100%', maxWidth: '360px', padding: '0.75rem', marginBottom: '0.75rem' }}
-                />
-                <button type="button" onClick={handleSaveName} className="primaryButton">
-                  Save Username
-                </button>
-              </>
-            )}
-          </div>
+          <UsernameCard
+            nameSaved={nameSaved}
+            name={name}
+            setName={setName}
+            handleSaveName={handleSaveName}
+          />
 
           <div className="panel" style={{ marginBottom: '1.5rem' }}>
             <h2>Create a new room</h2>
