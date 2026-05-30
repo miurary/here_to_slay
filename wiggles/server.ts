@@ -451,6 +451,53 @@ io.on('connection', (socket: Socket) => {
     sendRoomUpdate();
   });
 
+  socket.on('rollHeroAbility', (heroInstanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
+    console.log("GameState: ", gameState);
+
+    if (gameState.status !== 'in_progress') {
+      console.log("Cannot roll hero ability now.", gameState.status);
+      socket.emit('actionFailed', 'Cannot roll hero ability now.');
+      return;
+    }
+
+    if (socket.id !== gameState.activePlayerId) {
+      console.log('Not your turn.');
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    const hero = player.zones.party.find((card) => card.instanceId === heroInstanceId);
+    if (!hero || hero.cardType !== 'hero') {
+      console.log('Hero not found in your party.');
+      socket.emit('actionFailed', 'Hero not found in your party.');
+      return;
+    }
+
+    const template = gameState.cardTemplates[hero.templateId];
+    const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
+    const die1 = Math.floor(Math.random() * 6) + 1;
+    const die2 = Math.floor(Math.random() * 6) + 1;
+    const total = die1 + die2;
+    const success = total >= requiredRoll;
+    const message = `Rolled ${die1} + ${die2} = ${total}. ${success ? 'Success!' : 'Failed.'} (needed ${requiredRoll}).`;
+
+    socket.emit('heroRollResult', {
+      heroInstanceId,
+      die1,
+      die2,
+      total,
+      requiredRoll,
+      success,
+      message,
+    });
+  });
+
   socket.on('rollForFirst', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'rolling' || !gameState.currentRollerId) {

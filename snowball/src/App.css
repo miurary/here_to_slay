@@ -95,15 +95,16 @@ body {
   background: #f8fafc;
   text-align: center;
   transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.cardHero {
   cursor: pointer;
 }
 
-.cardHero:hover {
+.card:hover {
   background: #f1f5f9;
 }
+
+.cardHero {
+}
+
 
 .cardSelected {
   border-color: #2563eb;

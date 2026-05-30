@@ -13,6 +13,9 @@ export default function Game() {
   const [myId, setMyId] = useState<string>('');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isRolling, setIsRolling] = useState(false);
+  const [rollAnimationTimer, setRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [heroRollAnimationTimer, setHeroRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const MIN_ROLL_ANIMATION_MS = 3000;
 
   const getCardTypeLabel = (card: { cardType: string }, template?: Record<string, unknown>) => {
     const typeLabel = card.cardType.charAt(0).toUpperCase() + card.cardType.slice(1);
@@ -106,17 +109,33 @@ export default function Game() {
       setGameState(state);
       setStatus(`Game status: ${state.status}`);
 
-      if (state.status === 'rolling') {
-        const clientId = client.id ?? '';
-        setMyRoll(clientId ? state.diceRolls[clientId] ?? null : null);
-        setIsRolling(false);
-      } else {
-        setMyRoll(null);
+      const clientId = client.id ?? '';
+      setMyRoll(clientId ? state.diceRolls[clientId] ?? null : null);
+
+      if (!rollAnimationTimer) {
         setIsRolling(false);
       }
     });
 
+    client.on('heroRollResult', (result) => {
+      console.log("onHeroRollResult: ", result);
+      console.log("pendingHeroPlayId: ", pendingHeroPlayId);
+      if (result.heroInstanceId === pendingHeroPlayId) {
+        console.log("Setting play hero roll result");
+        setPlayHeroRollResult(result.message);
+      }
+      if (result.heroInstanceId === selectedHeroId && selectedHeroLocation === 'party') {
+        console.log("Setting hero roll result");
+        setHeroRollResult(result.message);
+      }
+      if (!heroRollAnimationTimer) {
+        setIsHeroRolling(false);
+      }
+      console.log("is hero rolling: ", isHeroRolling);
+    });
+
     client.on('actionFailed', (msg) => {
+      console.log("Action failed: ", msg);
       setActionMessage(msg);
       setTimeout(() => setActionMessage(null), 2500);
     });
@@ -153,15 +172,34 @@ export default function Game() {
     }
   }, [name, socket]);
 
+  useEffect(() => {
+    return () => {
+      if (rollAnimationTimer) {
+        clearTimeout(rollAnimationTimer);
+      }
+      if (heroRollAnimationTimer) {
+        clearTimeout(heroRollAnimationTimer);
+      }
+    };
+  }, [rollAnimationTimer, heroRollAnimationTimer]);
+
   const handleStart = () => {
     socket?.emit('startGame');
   };
 
   const handleRoll = () => {
+    if (rollAnimationTimer) {
+      clearTimeout(rollAnimationTimer);
+    }
+
     setIsRolling(true);
-    setTimeout(() => {
-      socket?.emit('rollForFirst');
-    }, 1000);
+    const timer = setTimeout(() => {
+      setIsRolling(false);
+      setRollAnimationTimer(null);
+    }, MIN_ROLL_ANIMATION_MS);
+
+    setRollAnimationTimer(timer);
+    socket?.emit('rollForFirst');
   };
 
   const handleContinue = () => {
@@ -206,28 +244,25 @@ export default function Game() {
       return;
     }
 
-    const player = gameState.players[myId];
-    const selectedHero = player?.zones.hand.find((card) => card.instanceId === pendingHeroPlayId);
-    if (!selectedHero) {
-      return;
+    if (heroRollAnimationTimer) {
+      console.log("clearing heroRollAnimationTimer");
+      clearTimeout(heroRollAnimationTimer);
     }
 
     setIsHeroRolling(true);
     setPlayHeroRollResult(null);
-
-    setTimeout(() => {
-      const template = gameState.cardTemplates[selectedHero.templateId];
-      const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
-      const die1 = Math.floor(Math.random() * 6) + 1;
-      const die2 = Math.floor(Math.random() * 6) + 1;
-      const total = die1 + die2;
-      const success = total >= requiredRoll;
-      const resultText = `Rolled ${die1} + ${die2} = ${total}. ${success ? 'Success!' : 'Failed.'} (needed ${requiredRoll}).`;
-
-      setPlayHeroRollResult(resultText);
+    const timer = setTimeout(() => {
       setIsHeroRolling(false);
-      confirmPlayHero();
-    }, 1000);
+      setHeroRollAnimationTimer(null);
+    }, MIN_ROLL_ANIMATION_MS);
+
+    console.log("timer: ", timer);
+
+    setHeroRollAnimationTimer(timer);
+
+    console.log("hero roll animation timer: ", heroRollAnimationTimer);
+
+    socket?.emit('rollHeroAbility', pendingHeroPlayId);
   };
 
   const handleSkipPlayHeroRoll = () => {
@@ -285,22 +320,9 @@ export default function Game() {
       return;
     }
 
-    const player = gameState.players[myId];
-    const selectedHero = player?.zones.party.find((card) => card.instanceId === selectedHeroId);
-    if (!selectedHero) {
-      return;
-    }
-
-    const template = gameState.cardTemplates[selectedHero.templateId];
-    const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
-    const die1 = Math.floor(Math.random() * 6) + 1;
-    const die2 = Math.floor(Math.random() * 6) + 1;
-    const total = die1 + die2;
-    const success = total >= requiredRoll;
-
-    setHeroRollResult(
-      `Rolled ${die1} + ${die2} = ${total}. ${success ? 'Success!' : 'Failed.'} (needed ${requiredRoll}).`
-    );
+    setIsHeroRolling(true);
+    setHeroRollResult(null);
+    socket?.emit('rollHeroAbility', selectedHeroId);
   };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -857,6 +879,25 @@ export default function Game() {
                                 )}
                               </>
                             )}
+                            {card.cardType === 'item' && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const isCursed = (template?.subtype as string | undefined)?.toLowerCase() === 'cursed';
+                                  if (isCursed) {
+                                    handleInitiateCursedItemPlay(card.instanceId);
+                                  } else {
+                                    setPendingItemPlayId(card.instanceId);
+                                    setItemPlayPromptOpen(true);
+                                    setViewedItemId(null);
+                                  }
+                                }}
+                                style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                              >
+                                Use Item
+                              </button>
+                            )}
                             {abilityText && (
                               <div style={{ fontSize: '0.65rem', color: '#333', marginTop: '0.5rem', fontStyle: 'italic', lineHeight: '1.3' }}>
                                 {abilityText}
@@ -903,33 +944,37 @@ export default function Game() {
                             )}
                             {playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId && (
                               <div style={{ marginTop: '1rem', padding: '1rem', border: '1px dashed #007bff', borderRadius: '8px', backgroundColor: '#eef5ff' }}>
-                                <div style={{ marginBottom: '0.75rem' }}>
-                                  Would you like to roll for this hero's ability before playing it?
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handlePlayHeroRoll();
-                                    }}
-                                    disabled={isHeroRolling}
-                                    style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
-                                  >
-                                    Roll Ability
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleSkipPlayHeroRoll();
-                                    }}
-                                    disabled={isHeroRolling}
-                                    style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
-                                  >
-                                    Don't Roll
-                                  </button>
-                                </div>
+                                {!isHeroRolling && (
+                                  <div style={{ marginBottom: '0.75rem' }}>
+                                    Would you like to roll for this hero's ability before playing it?
+                                  </div>
+                                )}
+                                {!isHeroRolling && (
+                                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handlePlayHeroRoll();
+                                      }}
+                                      disabled={isHeroRolling}
+                                      style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
+                                    >
+                                      Roll Ability
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleSkipPlayHeroRoll();
+                                      }}
+                                      disabled={isHeroRolling}
+                                      style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
+                                    >
+                                      Don't Roll
+                                    </button>
+                                  </div>
+                                )}
                                 {isHeroRolling && (
                                   <div style={{ fontSize: '2rem', marginTop: '1rem', animation: 'spin 0.1s infinite' }}>
                                     🎲 🎲

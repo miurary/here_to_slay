@@ -1,8 +1,19 @@
+export interface HeroRollResult {
+  heroInstanceId: string;
+  die1: number;
+  die2: number;
+  total: number;
+  requiredRoll: number;
+  success: boolean;
+  message: string;
+}
+
 export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
   startGame: () => void;
   rollForFirst: () => void;
+  rollHeroAbility: (heroInstanceId: string) => void;
   continueGame: () => void;
   choosePartyLeader: (instanceId: string) => void;
   playHero: (instanceId: string) => void;
@@ -19,6 +30,7 @@ export interface ServerToClientEvents {
   stateUpdate: (state: GameState) => void;
   actionFailed: (message: string) => void;
   cardDrawn: (card: { instanceId: string; templateId: string }) => void;
+  heroRollResult: (result: HeroRollResult) => void;
 }
 
 // need to fix clanker code
