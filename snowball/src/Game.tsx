@@ -4,11 +4,21 @@ import { io, Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, GameState, PlayerState } from '../../shared/types';
 import './App.css';
 
+import FirstRollCard from './components/game/FirstRollCard';
+import GameStatusCard from './components/game/GameStatusCard';
+import HandCard from './components/game/HandCard';
+import PartyCard from './components/game/PartyCard';
+import PartyLeaderCard from './components/game/PartyLeaderCard';
+import PartyLeaderSelectionCard from './components/game/PartyLeaderSelectionCard';
+import PartyLeaderReviewCard from './components/game/PartyLeaderReviewCard';
+import RollCompleteCard from './components/game/RollCompleteCard';
+
+import { getCardTypeLabel, getTemplateForInstanceId } from './utils/gameUtils';
+
 export default function Game() {
   const { roomCode: rawRoomCode } = useParams();
   const roomCode = rawRoomCode?.toUpperCase() ?? '';
   const navigate = useNavigate();
-
   const [name, setName] = useState<string>(localStorage.getItem('username') ?? '');
   const [myId, setMyId] = useState<string>('');
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -16,42 +26,6 @@ export default function Game() {
   const [rollAnimationTimer, setRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [heroRollAnimationTimer, setHeroRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const MIN_ROLL_ANIMATION_MS = 3000;
-
-  const getCardTypeLabel = (card: { cardType: string }, template?: Record<string, unknown>) => {
-    const typeLabel = card.cardType.charAt(0).toUpperCase() + card.cardType.slice(1);
-    const subtype = template?.subtype as string | undefined;
-    if (card.cardType === 'item' && subtype) {
-      const subtypeText = subtype.charAt(0).toUpperCase() + subtype.slice(1);
-      return `${subtypeText} ${typeLabel}s`;
-    }
-    return typeLabel;
-  };
-
-  const findCardInstanceById = (instanceId?: string | null) => {
-    if (!instanceId || !gameState) return undefined;
-    // search players' zones
-    for (const p of Object.values(gameState.players)) {
-      for (const zone of ['hand', 'party', 'discardPile'] as const) {
-        const found = p.zones[zone].find((c) => c.instanceId === instanceId);
-        if (found) return found;
-      }
-    }
-    // search active monsters
-    const foundMon = gameState.activeMonsters.find((m) => m.instanceId === instanceId);
-    if (foundMon) return foundMon as any;
-    // search decks
-    const foundMain = gameState.mainDeck.find((c) => c.instanceId === instanceId);
-    if (foundMain) return foundMain;
-    const foundParty = gameState.partyLeaderDeck.find((c) => c.instanceId === instanceId);
-    if (foundParty) return foundParty;
-    return undefined;
-  };
-
-  const getTemplateForInstanceId = (instanceId?: string | null) => {
-    const inst = findCardInstanceById(instanceId);
-    if (!inst) return undefined;
-    return gameState?.cardTemplates[inst.templateId];
-  };
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -406,327 +380,37 @@ export default function Game() {
             )}
 
             {gameState?.status === 'rolling' && (
-              <div className="panel panelAccentBlue">
-                <h2>Roll for First Player!</h2>
-                <p>Roll two 6-sided dice - highest sum goes first!</p>
-                {gameState.currentRollerId && (
-                  <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'white', borderRadius: '4px', border: '2px solid #ff9800' }}>
-                    <strong style={{ color: '#ff9800', fontSize: '1.1rem' }}>
-                      Currently rolling: {gameState.currentRollerId ? gameState.players[gameState.currentRollerId]?.username || gameState.currentRollerId : 'Unknown'}
-                    </strong>
-                  </div>
-                )}
-                {gameState.currentRollerId === myId && (
-                  <button
-                    type="button"
-                    onClick={handleRoll}
-                    disabled={isRolling || myRoll !== null}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      fontSize: '1.1rem',
-                      backgroundColor: isRolling || myRoll !== null ? '#ccc' : '#007bff',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: isRolling || myRoll !== null ? 'not-allowed' : 'pointer',
-                      marginBottom: '1rem'
-                    }}
-                  >
-                    {myRoll !== null ? `You rolled: ${myRoll}` : isRolling ? 'Rolling...' : 'Roll Dice'}
-                  </button>
-                )}
-                {gameState.currentRollerId !== myId && (
-                  <p style={{ marginBottom: '1rem', color: '#666' }}>
-                    Waiting for {gameState.currentRollerId ? gameState.players[gameState.currentRollerId]?.username : 'a player'} to roll...
-                  </p>
-                )}
-                {isRolling && (
-                  <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 0.1s infinite' }}>
-                    🎲 🎲
-                  </div>
-                )}
-                <div style={{ marginTop: '1.5rem' }}>
-                  <h4>Roll Results:</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem' }}>
-                    {gameState?.diceRolls && Object.entries(gameState.diceRolls).length > 0 ? (
-                      Object.entries(gameState.diceRolls).map(([playerId, roll]) => {
-                        const player = gameState.players[playerId];
-                        return (
-                          <div key={playerId} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
-                            <div style={{ fontWeight: 'bold' }}>{player.username || 'Player'}</div>
-                            <div style={{ fontSize: '1.5rem', color: '#007bff' }}>{roll}</div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p style={{ color: '#999' }}>No rolls yet...</p>
-                    )}
-                    {itemPlayPromptOpen && pendingItemPlayId && (
-                      <div style={{ marginTop: '1rem', padding: '1rem', border: '1px dashed #28a745', borderRadius: '8px', backgroundColor: '#f1fff4' }} onClick={(e) => e.stopPropagation()}>
-                        <div style={{ marginBottom: '0.5rem', fontWeight: 'bold' }}>Choose a hero to equip this item to (cost: 1 AP)</div>
-                        <div style={{ display: 'grid', gap: '0.5rem' }}>
-                          {gameState.players[myId].zones.party.filter((c) => c.cardType === 'hero').length > 0 ? (
-                            gameState.players[myId].zones.party.filter((c) => c.cardType === 'hero').map((hero) => {
-                              const t = gameState.cardTemplates[hero.templateId];
-                              return (
-                                <div key={hero.instanceId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <div>
-                                    <div style={{ fontWeight: 'bold' }}>{t?.name || hero.templateId}</div>
-                                    <div style={{ fontSize: '0.85rem', color: '#666' }}>{(t?.abilityText as string) || ''}</div>
-                                  </div>
-                                  <div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmPlayItem(hero.instanceId)}
-                                      disabled={(gameState.players[myId]?.actionPoints ?? 0) < 1 || isItemPlaying}
-                                      style={{ padding: '0.4rem 0.6rem', backgroundColor: (gameState.players[myId]?.actionPoints ?? 0) < 1 || isItemPlaying ? '#ccc' : '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: (gameState.players[myId]?.actionPoints ?? 0) < 1 || isItemPlaying ? 'not-allowed' : 'pointer' }}
-                                    >
-                                      Equip
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div style={{ color: '#666' }}>You have no heroes in your party to equip.</div>
-                          )}
-                        </div>
-                        <div style={{ marginTop: '0.75rem' }}>
-                          <button type="button" onClick={handleCancelPlayItem} style={{ padding: '0.4rem 0.6rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>Cancel</button>
-                        </div>
-                      </div>
-                    )}
-                    {cursedItemPlayPromptOpen && pendingCursedItemPlayId && (
-                      <div style={{ marginTop: '1rem', padding: '1rem', border: '1px dashed #dc3545', borderRadius: '8px', backgroundColor: '#fff1f2' }} onClick={(e) => e.stopPropagation()}>
-                        <div style={{ marginBottom: '0.75rem', fontWeight: 'bold' }}>Choose an opponent and hero to target with this cursed item (cost: 1 AP)</div>
-                        <div style={{ display: 'grid', gap: '0.75rem' }}>
-                          {Object.entries(gameState.players).filter(([playerId]) => playerId !== myId).length > 0 ? (
-                            Object.entries(gameState.players).filter(([playerId]) => playerId !== myId).map(([playerId, opponent]) => {
-                              const isSelected = selectedTargetOpponentId === playerId;
-                              return (
-                                <div key={playerId} style={{ padding: '0.75rem', border: `1px solid ${isSelected ? '#dc3545' : '#ddd'}`, borderRadius: '8px', backgroundColor: isSelected ? '#ffe5e9' : 'white' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                    <div style={{ fontWeight: 'bold' }}>{opponent.username || 'Opponent'}</div>
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedTargetOpponentId(playerId)}
-                                      style={{ padding: '0.3rem 0.5rem', backgroundColor: isSelected ? '#bd2130' : '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                    >
-                                      {isSelected ? 'Selected' : 'Target'}
-                                    </button>
-                                  </div>
-                                  {isSelected ? (
-                                    <div style={{ display: 'grid', gap: '0.5rem' }}>
-                                      {opponent.zones.party.filter((c) => c.cardType === 'hero').length > 0 ? (
-                                        opponent.zones.party.filter((c) => c.cardType === 'hero').map((hero) => {
-                                          const t = gameState.cardTemplates[hero.templateId];
-                                          return (
-                                            <div key={hero.instanceId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fff' }}>
-                                              <div>
-                                                <div style={{ fontWeight: 'bold' }}>{t?.name || hero.templateId}</div>
-                                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{(t?.abilityText as string) || ''}</div>
-                                              </div>
-                                              <button
-                                                type="button"
-                                                onClick={() => handleConfirmCursedItemPlay(hero.instanceId)}
-                                                disabled={(gameState.players[myId]?.actionPoints ?? 0) < 1 || isCursedItemPlaying}
-                                                style={{ padding: '0.4rem 0.6rem', backgroundColor: (gameState.players[myId]?.actionPoints ?? 0) < 1 || isCursedItemPlaying ? '#ccc' : '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: (gameState.players[myId]?.actionPoints ?? 0) < 1 || isCursedItemPlaying ? 'not-allowed' : 'pointer' }}
-                                              >
-                                                Curse
-                                              </button>
-                                            </div>
-                                          );
-                                        })
-                                      ) : (
-                                        <div style={{ color: '#666' }}>This opponent has no heroes in their party.</div>
-                                      )}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div style={{ color: '#666' }}>No opponents available to target.</div>
-                          )}
-                        </div>
-                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-                          <button type="button" onClick={handleCancelCursedItemPlay} style={{ padding: '0.4rem 0.6rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>Cancel</button>
-                          <button type="button" onClick={() => setCursedItemPlayPromptOpen(false)} style={{ padding: '0.4rem 0.6rem', backgroundColor: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb', borderRadius: '4px' }}>Back</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <style>{`@keyframes spin {0% { transform: rotateX(0deg) rotateY(0deg); }100% { transform: rotateX(360deg) rotateY(360deg); }}`}</style>
-              </div>
+              <FirstRollCard
+                gameState={gameState}
+                myId={myId}
+                handleRoll={handleRoll}
+                isRolling={isRolling}
+                myRoll={myRoll}
+              />
             )}
 
             {gameState?.status === 'roll_complete' && (
-              <div className="panel panelAccentGreen">
-                <h2>Roll Results</h2>
-                <p style={{ fontSize: '1rem', marginBottom: '1rem' }}>
-                  {gameState.rollWinnerId
-                    ? `${gameState.players[gameState.rollWinnerId]?.username || 'A player'} won and will go first!`
-                    : 'All players have rolled. See results below.'}
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                  {Object.entries(gameState.diceRolls).map(([playerId, roll]) => {
-                    const player = gameState.players[playerId];
-                    return (
-                      <div key={playerId} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
-                        <div style={{ fontWeight: 'bold' }}>{player.username || 'Player'}</div>
-                        <div style={{ fontSize: '1.5rem', color: '#28a745' }}>{roll}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {gameState.lobbyLeaderId === myId ? (
-                  <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    Continue to Game
-                  </button>
-                ) : (
-                  <p style={{ color: '#666' }}>
-                    Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
-                  </p>
-                )}
-              </div>
+              <RollCompleteCard
+                gameState={gameState}
+                myId={myId}
+                handleContinue={handleContinue}
+              />
             )}
 
             {gameState?.status === 'party_leader_selection' && (
-              <div className="panel panelAccentPurple">
-                <h2>Select Your Party Leader</h2>
-                <p style={{ marginBottom: '1rem' }}>
-                  Current chooser: {gameState.currentSelectionPlayerId ? gameState.players[gameState.currentSelectionPlayerId]?.username || 'Player' : 'None'}
-                </p>
-                <p style={{ marginBottom: '1rem', color: '#333' }}>
-                  {gameState.currentSelectionPlayerId === myId
-                    ? 'It is your turn to choose a party leader from the face down cards below.'
-                    : 'Waiting for the current player to choose a party leader.'}
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                  {gameState.availablePartyLeaderCards.map((card) => (
-                    <button
-                      key={card.instanceId}
-                      type="button"
-                      onClick={() => handleChoosePartyLeader(card.instanceId)}
-                      disabled={gameState.currentSelectionPlayerId !== myId}
-                      style={{
-                        height: '150px',
-                        backgroundColor: '#4a148c',
-                        color: 'white',
-                        borderRadius: '8px',
-                        border: '2px solid #2e0a4d',
-                        cursor: gameState.currentSelectionPlayerId === myId ? 'pointer' : 'not-allowed',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{ fontSize: '1rem', fontWeight: 'bold' }}>Party Leader</div>
-                      <div style={{ marginTop: '0.5rem', opacity: 0.85 }}>Face Down</div>
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <h4>Chosen Party Leaders</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
-                    {Object.values(gameState.players).map((player) => {
-                      const chosen = player.zones.party[0];
-                      const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
-                      return (
-                        <div key={player.id} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
-                          {chosen ? (
-                            <>
-                              <div style={{ fontSize: '0.9rem' }}>{template?.name || chosen.templateId}</div>
-                              <div style={{ fontSize: '0.75rem', color: '#666' }}>{(template?.abilityText as string) || ''}</div>
-                            </>
-                          ) : (
-                            <div style={{ color: '#999' }}>Not chosen yet</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+              <PartyLeaderSelectionCard
+                gameState={gameState}
+                myId={myId}
+                handleChoosePartyLeader={handleChoosePartyLeader}
+              />
             )}
 
             {gameState?.status === 'party_leader_review' && (
-              <div className="panel panelAccentGreen">
-                <h2>Party Leader Review</h2>
-                <p style={{ fontSize: '1rem', marginBottom: '1rem' }}>
-                  All players have chosen their party leaders. Review the choices below before continuing into the game.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                  {Object.values(gameState.players).map((player) => {
-                    const chosen = player.zones.party[0];
-                    const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
-                    return (
-                      <div key={player.id} style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{player.username || 'Player'}</div>
-                        {chosen ? (
-                          <>
-                            <div style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>{template?.name || chosen.templateId}</div>
-                            <div style={{ fontSize: '0.8rem', color: '#666' }}>{getCardTypeLabel(chosen, template)}</div>
-                            <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#333' }}>{(template?.abilityText as string) || 'No ability text available.'}</div>
-                          </>
-                        ) : (
-                          <div style={{ color: '#999' }}>No party leader chosen</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ marginBottom: '1.5rem' }}>
-                  <h3>Revealed Monsters</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
-                    {gameState.activeMonsters.map((monster) => {
-                      const template = gameState.cardTemplates[monster.templateId];
-                      const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
-                      const requirementText = requirements.length > 0
-                        ? requirements.map((req) => `${req.amount ?? '?'} ${req.class ?? 'Any'}`).join(', ')
-                        : 'No requirements';
-                      const lowerBound = template?.lowerBound as number | undefined;
-                      const lowerBoundText = template?.lowerBoundText as string | undefined;
-                      const upperBound = template?.upperBound as number | undefined;
-                      const upperBoundText = template?.upperBoundText as string | undefined;
-                      const slainEffectText = template?.slainEffectText as string | undefined;
-
-                      return (
-                        <div key={monster.instanceId} style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{template?.name || monster.templateId}</div>
-                          <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.75rem' }}>{requirementText}</div>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                            <span style={{ fontWeight: 'bold' }}>{lowerBound !== undefined ? `${lowerBound}-` : 'Lower:'}</span>
-                            <span style={{ fontSize: '0.85rem', color: '#333' }}>{lowerBoundText ?? 'No lower bound text'}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                            <span style={{ fontWeight: 'bold' }}>{upperBound !== undefined ? `${upperBound}+` : 'Upper:'}</span>
-                            <span style={{ fontSize: '0.85rem', color: '#333' }}>{upperBoundText ?? 'No upper bound text'}</span>
-                          </div>
-                          {slainEffectText && (
-                            <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '6px', backgroundColor: '#f8f0ff', color: '#333' }}>
-                              <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Slain Effect</div>
-                              <div style={{ fontSize: '0.8rem' }}>{slainEffectText}</div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                {gameState.lobbyLeaderId === myId ? (
-                  <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#20c997', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    Continue to Game
-                  </button>
-                ) : (
-                  <p style={{ color: '#666' }}>
-                    Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
-                  </p>
-                )}
-              </div>
+              <PartyLeaderReviewCard
+                gameState={gameState}
+                myId={myId}
+                handleContinue={handleContinue}
+              />
             )}
 
             {gameState?.status === 'in_progress' && (
@@ -739,287 +423,54 @@ export default function Game() {
             )}
 
             {gameState?.status === 'in_progress' && (
-              <div className="panel statusPanel">
-                <p style={{ margin: '0 0 0.5rem 0' }}>
-                  Current turn: <strong>{gameState.activePlayerId ? gameState.players[gameState.activePlayerId]?.username || gameState.activePlayerId : 'None'}</strong>
-                  {gameState.activePlayerId === myId ? ' (your turn)' : ''}
-                </p>
-                <p style={{ margin: '0 0 0.5rem 0' }}>
-                  Turn #: <strong>{gameState.turnNumber ?? 0}</strong>
-                </p>
-                <p style={{ margin: 0 }}>
-                  Your AP: <strong>{gameState.players[myId]?.actionPoints ?? 0}</strong>
-                </p>
-              </div>
+              <GameStatusCard
+                gameState={gameState}
+                myId={myId}
+              />
             )}
 
             {gameState && gameState.status === 'in_progress' && gameState.players[myId] && (
               <>
                 <div className="boardTopRow">
-                  {gameState.players[myId].zones.party[0] && (() => {
-                    const partyLeader = gameState.players[myId].zones.party[0];
-                    const template = gameState.cardTemplates[partyLeader.templateId];
-                    const cardName = template?.name || partyLeader.templateId;
-                    const abilityText = (template?.abilityText as string) || '';
-                    return (
-                      <div style={{ width: '220px', padding: '1rem', border: '2px solid #333', borderRadius: '8px', backgroundColor: '#faf7f0' }}>
-                        <h3 style={{ marginTop: 0 }}>Your Party Leader</h3>
-                        <div style={{ fontSize: '1rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>{cardName}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem' }}>{getCardTypeLabel(partyLeader, template)}</div>
-                        {abilityText && (
-                          <div style={{ fontSize: '0.8rem', color: '#333', lineHeight: '1.4' }}>{abilityText}</div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  <PartyLeaderCard gameState={gameState} myId={myId} />
 
-                  <div className="panel panelParty">
-                    <h3 style={{ marginTop: 0 }}>Your Party</h3>
-                    <div style={{ minHeight: '120px', display: 'grid', gap: '0.75rem' }}>
-                      {gameState.players[myId].zones.party.filter((card) => card.cardType === 'hero').length > 0 ? (
-                        gameState.players[myId].zones.party
-                          .filter((card) => card.cardType === 'hero')
-                          .map((card) => {
-                            const template = gameState.cardTemplates[card.templateId];
-                            const rollToPlay = template?.rollToPlay as number | undefined;
-                            const equippedTemplate = getTemplateForInstanceId(card.equippedItem);
-                            return (
-                              <div
-                                key={card.instanceId}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedHeroId(card.instanceId);
-                                  setSelectedHeroLocation('party');
-                                  setHeroRollResult(null);
-                                }}
-                                className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
-                                style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff', cursor: 'pointer' }}
-                              >
-                                <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
-                                <div style={{ fontSize: '0.8rem', color: '#666' }}>{template?.class || 'Hero'}</div>
-                                {rollToPlay !== undefined && (
-                                  <div style={{ fontSize: '0.75rem', color: '#444', marginTop: '0.5rem' }}>
-                                    Roll to use: +{rollToPlay}
-                                  </div>
-                                )}
-                                {card.equippedItem && (
-                                  <div style={{ marginTop: '0.5rem' }}>
-                                    <div style={{ fontSize: '0.75rem', color: '#333' }}>
-                                      Equipped: <button type="button" onClick={(e) => { e.stopPropagation(); setViewedItemId(card.equippedItem ?? null); }} style={{ background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', padding: 0 }}>{equippedTemplate?.name || 'Item'}</button>
-                                    </div>
-                                    {viewedItemId === card.equippedItem && equippedTemplate && (
-                                      <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '6px' }}>
-                                        <div style={{ fontWeight: 'bold' }}>{equippedTemplate.name}</div>
-                                        <div style={{ fontSize: '0.85rem', color: '#666' }}>{(equippedTemplate as any).type || ''}</div>
-                                        <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#333' }}>{((equippedTemplate as any).abilityText as string) || ''}</div>
-                                        <div style={{ marginTop: '0.5rem' }}>
-                                          <button type="button" onClick={() => setViewedItemId(null)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>Close</button>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })
-                      ) : (
-                        <div style={{ color: '#666' }}>Play hero cards from your hand to your party.</div>
-                      )}
-                    </div>
-                  </div>
+                  <PartyCard
+                    gameState={gameState} 
+                    myId={myId}
+                    selectedHeroId={selectedHeroId}
+                    setSelectedHeroId={setSelectedHeroId}
+                    viewedItemId={viewedItemId}
+                    setViewedItemId={setViewedItemId}
+                    setSelectedHeroLocation={setSelectedHeroLocation}
+                    setHeroRollResult={setHeroRollResult}
+                  />
 
-                  <div className="panel panelHand">
-                    <h3>Your Hand ({gameState.players[myId].zones.hand.length} cards)</h3>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {gameState.players[myId].zones.hand.map((card) => {
-                        const template = gameState.cardTemplates[card.templateId];
-                        const cardName = template?.name || card.templateId;
-                        const abilityText = (template?.abilityText as string) || '';
-                        const rollToPlay = template?.rollToPlay as number | undefined;
-                        const heroClass = template?.class as string | undefined;
-                        return (
-                          <div
-                            key={card.instanceId}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (card.cardType === 'hero') {
-                                setSelectedHeroId(card.instanceId);
-                                setSelectedHeroLocation('hand');
-                                setHeroRollResult(null);
-                              }
-                              if (card.cardType === 'item') {
-                                const isCursed = (template?.subtype as string | undefined)?.toLowerCase() === 'cursed';
-                                if (isCursed) {
-                                  handleInitiateCursedItemPlay(card.instanceId);
-                                } else {
-                                  // start regular item play flow
-                                  setPendingItemPlayId(card.instanceId);
-                                  setItemPlayPromptOpen(true);
-                                  setViewedItemId(null);
-                                }
-                              }
-                            }}
-                            className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
-                          >
-                            <div style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{cardName}</div>
-                            <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.25rem' }}>
-                              {getCardTypeLabel(card, template)}
-                            </div>
-                            {card.cardType === 'hero' && (
-                              <>
-                                {heroClass && (
-                                  <div style={{ fontSize: '0.75rem', color: '#444', marginTop: '0.5rem' }}>
-                                    Class: {heroClass}
-                                  </div>
-                                )}
-                                {rollToPlay !== undefined && (
-                                  <div style={{ fontSize: '0.75rem', color: '#444', marginTop: '0.25rem' }}>
-                                    Roll to play: +{rollToPlay}
-                                  </div>
-                                )}
-                              </>
-                            )}
-                            {card.cardType === 'item' && (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  const isCursed = (template?.subtype as string | undefined)?.toLowerCase() === 'cursed';
-                                  if (isCursed) {
-                                    handleInitiateCursedItemPlay(card.instanceId);
-                                  } else {
-                                    setPendingItemPlayId(card.instanceId);
-                                    setItemPlayPromptOpen(true);
-                                    setViewedItemId(null);
-                                  }
-                                }}
-                                style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-                              >
-                                Use Item
-                              </button>
-                            )}
-                            {abilityText && (
-                              <div style={{ fontSize: '0.65rem', color: '#333', marginTop: '0.5rem', fontStyle: 'italic', lineHeight: '1.3' }}>
-                                {abilityText}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {selectedHero && (
-                      <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #007bff', borderRadius: '8px', backgroundColor: '#e7f3ff' }}>
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <strong>Selected Hero:</strong> {selectedHero ? gameState.cardTemplates[selectedHero.templateId]?.name || 'Hero' : 'None'}
-                        </div>
-                        <div style={{ marginBottom: '0.75rem', color: '#333' }}>
-                          {(gameState.cardTemplates[selectedHero.templateId]?.abilityText as string) || 'No ability text available.'}
-                        </div>
-                        {selectedHeroLocation === 'hand' ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handlePlayHero(selectedHero.instanceId);
-                              }}
-                              disabled={selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId)}
-                              style={{
-                                padding: '0.75rem 1.25rem',
-                                fontSize: '1rem',
-                                backgroundColor: selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? '#ccc' : '#007bff',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              {playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId ? 'Waiting for roll decision…' : 'Play Hero (-1 AP)'}
-                            </button>
-                            {selectedHeroAP < 1 && (
-                              <div style={{ marginTop: '0.75rem', color: '#c00' }}>
-                                You need at least 1 AP to play this hero.
-                              </div>
-                            )}
-                            {playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId && (
-                              <div style={{ marginTop: '1rem', padding: '1rem', border: '1px dashed #007bff', borderRadius: '8px', backgroundColor: '#eef5ff' }}>
-                                {!isHeroRolling && (
-                                  <div style={{ marginBottom: '0.75rem' }}>
-                                    Would you like to roll for this hero's ability before playing it?
-                                  </div>
-                                )}
-                                {!isHeroRolling && (
-                                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handlePlayHeroRoll();
-                                      }}
-                                      disabled={isHeroRolling}
-                                      style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
-                                    >
-                                      Roll Ability
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleSkipPlayHeroRoll();
-                                      }}
-                                      disabled={isHeroRolling}
-                                      style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
-                                    >
-                                      Don't Roll
-                                    </button>
-                                  </div>
-                                )}
-                                {isHeroRolling && (
-                                  <div style={{ fontSize: '2rem', marginTop: '1rem', animation: 'spin 0.1s infinite' }}>
-                                    🎲 🎲
-                                  </div>
-                                )}
-                                {playHeroRollResult && (
-                                  <div style={{ marginTop: '0.75rem', color: '#333' }}>
-                                    {playHeroRollResult}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        ) : selectedHeroLocation === 'party' ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleRollHeroAbility();
-                              }}
-                              style={{
-                                padding: '0.75rem 1.25rem',
-                                fontSize: '1rem',
-                                backgroundColor: '#007bff',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Roll for Hero Ability
-                            </button>
-                            {heroRollResult && (
-                              <div style={{ marginTop: '0.75rem', color: '#333' }}>
-                                {heroRollResult}
-                              </div>
-                            )}
-                          </>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-
+                  <HandCard
+                    gameState={gameState}
+                    myId={myId}
+                    selectedHeroId={selectedHeroId}
+                    setSelectedHeroId={setSelectedHeroId}
+                    setViewedItemId={setViewedItemId}
+                    setSelectedHeroLocation={setSelectedHeroLocation}
+                    setHeroRollResult={setHeroRollResult}
+                    handlePlayHero={handlePlayHero}
+                    handleInitiateCursedItemPlay={handleInitiateCursedItemPlay}
+                    setPendingItemPlayId={setPendingItemPlayId}
+                    setItemPlayPromptOpen={setItemPlayPromptOpen}
+                    pendingHeroPlayId={pendingHeroPlayId}
+                    selectedHero={selectedHero}
+                    selectedHeroLocation={selectedHeroLocation}
+                    heroRollResult={heroRollResult}
+                    playHeroPromptOpen={playHeroPromptOpen}
+                    isHeroRolling={isHeroRolling}
+                    selectedHeroAP={selectedHeroAP}
+                    handlePlayHeroRoll={handlePlayHeroRoll}
+                    handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
+                    handleRollHeroAbility={handleRollHeroAbility}
+                    playHeroRollResult={playHeroRollResult}
+                  />
                 </div>
+                
                 <div style={{ marginBottom: '1rem' }}>
                   {gameState.activePlayerId === myId && (
                     <button
@@ -1182,7 +633,7 @@ export default function Game() {
                             const template = gameState.cardTemplates[card.templateId];
                             const abilityText = (template?.abilityText as string) || '';
                             const rollToPlay = template?.rollToPlay as number | undefined;
-                            const equippedTemplate = getTemplateForInstanceId(card.equippedItem);
+                            const equippedTemplate = getTemplateForInstanceId(gameState, card.equippedItem);
                             return (
                               <div key={card.instanceId} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: 'white' }}>
                                 <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>

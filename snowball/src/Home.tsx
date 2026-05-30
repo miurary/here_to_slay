@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import UsernameCard from './components/UsernameCard';
+import UsernameCard from './components/home/UsernameCard';
 import './App.css';
 
 export default function Home() {
