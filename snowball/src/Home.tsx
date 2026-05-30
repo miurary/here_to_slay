@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import UsernameCard from './components/home/UsernameCard';
+import UsernameCard from './components/UsernameCard';
+import CreateNewRoomCard from './components/CreateNewRoomCard';
+import JoinExistingRoomCard from './components/JoinExistingRoomCard';
 import './App.css';
 
 export default function Home() {
@@ -85,13 +87,7 @@ export default function Home() {
             handleSaveName={handleSaveName}
           />
 
-          <div className="panel" style={{ marginBottom: '1.5rem' }}>
-            <h2>Create a new room</h2>
-            <p>Generate a room code and invite friends to join.</p>
-            <button type="button" onClick={handleCreateRoom} className="primaryButton">
-              Create Game Room
-            </button>
-          </div>
+          <CreateNewRoomCard handleCreateRoom={handleCreateRoom} />
 
           <div className="panel">
             <h2>Join an existing room</h2>
