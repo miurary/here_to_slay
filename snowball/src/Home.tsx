@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import UsernameCard from './components/UsernameCard';
-import CreateNewRoomCard from './components/CreateNewRoomCard';
-import JoinExistingRoomCard from './components/JoinExistingRoomCard';
+import UsernameCard from './components/home/UsernameCard';
+import CreateNewRoomCard from './components/home/CreateNewRoomCard';
+import JoinExistingRoomCard from './components/home/JoinExistingRoomCard';
 import './App.css';
 
 export default function Home() {
