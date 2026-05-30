@@ -14,6 +14,8 @@ import PartyLeaderReviewCard from './components/game/PartyLeaderReviewCard';
 import RollCompleteCard from './components/game/RollCompleteCard';
 
 import { getCardTypeLabel, getTemplateForInstanceId } from './utils/gameUtils';
+import EndTurnButton from './components/game/EndTurnButton';
+import MainDeckCard from './components/game/MainDeckCard';
 
 export default function Game() {
   const { roomCode: rawRoomCode } = useParams();
@@ -179,6 +181,10 @@ export default function Game() {
   const handleContinue = () => {
     socket?.emit('continueGame');
   };
+
+  const handleDrawFromMain = () => {
+    socket?.emit('drawFromMain')
+  }
 
   const handleChoosePartyLeader = (instanceId: string) => {
     if (gameState?.status !== 'party_leader_selection') {
@@ -471,65 +477,22 @@ export default function Game() {
                   />
                 </div>
                 
-                <div style={{ marginBottom: '1rem' }}>
-                  {gameState.activePlayerId === myId && (
-                    <button
-                      type="button"
-                      onClick={handleEndTurn}
-                      style={{ padding: '0.5rem 1rem', fontSize: '1rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}
-                    >
-                      End Turn
-                    </button>
-                  )}
-                </div>
-                <div style={{ marginBottom: '1rem' }}>
-                  <h3>Main Deck</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div
-                      onClick={() => {
-                        if (gameState.status !== 'in_progress' || gameState.activePlayerId !== myId) {
-                          setActionMessage('Not your turn to draw');
-                          setTimeout(() => setActionMessage(null), 1800);
-                          return;
-                        }
-                        setShowDrawPrompt(true);
-                      }}
-                      style={{ width: '120px', height: '160px', backgroundColor: '#2e2e2e', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', cursor: gameState.activePlayerId === myId ? 'pointer' : 'not-allowed' }}
-                    >
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontWeight: 'bold' }}>Deck</div>
-                        <div style={{ fontSize: '0.9rem' }}>{gameState.mainDeck.length} cards</div>
-                      </div>
-                    </div>
-
-                    {showDrawPrompt && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <button
-                          onClick={() => {
-                            const myAP = gameState.players[myId]?.actionPoints ?? 0;
-                            if (myAP >= 1) {
-                              socket?.emit('drawFromMain');
-                            }
-                            setShowDrawPrompt(false);
-                          }}
-                          disabled={(gameState.players[myId]?.actionPoints ?? 0) < 1}
-                          style={{ padding: '0.5rem 1rem', fontSize: '1rem' }}
-                        >
-                          Draw 1 card (-1 AP)
-                        </button>
-                        {(gameState.players[myId]?.actionPoints ?? 0) < 1 && (
-                          <div style={{ color: '#c00' }}>Not enough AP</div>
-                        )}
-                      </div>
-                    )}
-                    {actionMessage && (
-                      <div style={{ marginLeft: '1rem', color: '#a00', fontWeight: 'bold' }}>{actionMessage}</div>
-                    )}
-                    {justDrew && (
-                      <div style={{ marginLeft: '1rem', color: '#0a0', fontWeight: 'bold' }}>Drew a card!</div>
-                    )}
-                  </div>
-                </div>
+                <EndTurnButton 
+                  gameState={gameState}
+                  myId={myId}
+                  handleEndTurn={handleEndTurn}
+                />
+                
+                <MainDeckCard
+                  gameState={gameState}
+                  myId={myId}
+                  showDrawPrompt={showDrawPrompt}
+                  actionMessage={actionMessage}
+                  justDrew={justDrew}
+                  setActionMessage={setActionMessage}
+                  setShowDrawPrompt={setShowDrawPrompt}
+                  handleDrawFromMain={handleDrawFromMain}
+                />
               </>
             )}
           </main>
