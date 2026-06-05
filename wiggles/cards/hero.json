@@ -37,8 +37,7 @@
                 {
                     "type": "DISCARD",
                     "cardType": "modifier",
-                    "amount": 1,
-                    "targetZone": "hand"
+                    "amount": 1
                 }
             ],
             "effects": [

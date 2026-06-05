@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, GameState, PlayerState } from '../../shared/types';
@@ -12,8 +12,6 @@ import PartyLeaderCard from './components/game/PartyLeaderCard';
 import PartyLeaderSelectionCard from './components/game/PartyLeaderSelectionCard';
 import PartyLeaderReviewCard from './components/game/PartyLeaderReviewCard';
 import RollCompleteCard from './components/game/RollCompleteCard';
-
-import { getCardTypeLabel, getTemplateForInstanceId } from './utils/gameUtils';
 import EndTurnButton from './components/game/EndTurnButton';
 import MainDeckCard from './components/game/MainDeckCard';
 import ActiveMonstersSidebarCard from './components/game/ActiveMonstersSidebarCard';
@@ -41,6 +39,11 @@ export default function Game() {
   const [pendingHeroPlayId, setPendingHeroPlayId] = useState<string | null>(null);
   const [playHeroRollResult, setPlayHeroRollResult] = useState<string | null>(null);
   const [isHeroRolling, setIsHeroRolling] = useState(false);
+  const pendingHeroPlayIdRef = useRef<string | null>(pendingHeroPlayId);
+  const selectedHeroIdRef = useRef<string | null>(selectedHeroId);
+  const selectedHeroLocationRef = useRef<'hand' | 'party' | null>(selectedHeroLocation);
+  const heroRollAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(heroRollAnimationTimer);
+  const isHeroRollingRef = useRef<boolean>(isHeroRolling);
   const [selectedOpponentPartyId, setSelectedOpponentPartyId] = useState<string | null>(null);
   const [itemPlayPromptOpen, setItemPlayPromptOpen] = useState(false);
   const [pendingItemPlayId, setPendingItemPlayId] = useState<string | null>(null);
@@ -53,6 +56,14 @@ export default function Game() {
   const [status, setStatus] = useState<string>('Connecting...');
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
+
+  useEffect(() => {
+    pendingHeroPlayIdRef.current = pendingHeroPlayId;
+    selectedHeroIdRef.current = selectedHeroId;
+    selectedHeroLocationRef.current = selectedHeroLocation;
+    heroRollAnimationTimerRef.current = heroRollAnimationTimer;
+    isHeroRollingRef.current = isHeroRolling;
+  }, [pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling]);
 
   useEffect(() => {
     if (!roomCode) {
@@ -97,19 +108,19 @@ export default function Game() {
 
     client.on('heroRollResult', (result) => {
       console.log("onHeroRollResult: ", result);
-      console.log("pendingHeroPlayId: ", pendingHeroPlayId);
-      if (result.heroInstanceId === pendingHeroPlayId) {
+      console.log("pendingHeroPlayId: ", pendingHeroPlayIdRef.current);
+      if (result.heroInstanceId === pendingHeroPlayIdRef.current) {
         console.log("Setting play hero roll result");
         setPlayHeroRollResult(result.message);
       }
-      if (result.heroInstanceId === selectedHeroId && selectedHeroLocation === 'party') {
+      if (result.heroInstanceId === selectedHeroIdRef.current && selectedHeroLocationRef.current === 'party') {
         console.log("Setting hero roll result");
         setHeroRollResult(result.message);
       }
-      if (!heroRollAnimationTimer) {
+      if (!heroRollAnimationTimerRef.current) {
         setIsHeroRolling(false);
       }
-      console.log("is hero rolling: ", isHeroRolling);
+      console.log("is hero rolling: ", isHeroRollingRef.current);
     });
 
     client.on('actionFailed', (msg) => {
@@ -214,6 +225,7 @@ export default function Game() {
     setPendingHeroPlayId(instanceId);
     setPlayHeroPromptOpen(true);
     setPlayHeroRollResult(null);
+    console.log("handlePlayHero - pendingHeroPlayId: ", instanceId, pendingHeroPlayId);
   };
 
   const confirmPlayHero = () => {

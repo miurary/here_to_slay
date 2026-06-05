@@ -1,18 +1,19 @@
 import type { CardInstance, GameState } from '../../../../shared/types';
 import { getCardTypeLabel } from '../../utils/gameUtils';
+import type { Dispatch, SetStateAction } from 'react';
 
 interface HandCardProps {
     gameState: GameState;
     myId: string;
     selectedHeroId: string | null;
-    setSelectedHeroId: (id: string | null) => void;
-    setViewedItemId: (id: string | null) => void;
-    setSelectedHeroLocation: (location: 'party' | 'hand') => void;
-    setHeroRollResult: (result: string | null) => void;
+    setSelectedHeroId: Dispatch<SetStateAction<string | null>>;
+    setViewedItemId: Dispatch<SetStateAction<string | null>>;
+    setSelectedHeroLocation: Dispatch<SetStateAction<'hand' | 'party' | null>>;
+    setHeroRollResult: Dispatch<SetStateAction<string | null>>;
     handlePlayHero: (instanceId: string) => void;
     handleInitiateCursedItemPlay: (instanceId: string) => void;
-    setPendingItemPlayId: (instanceId: string | null) => void;
-    setItemPlayPromptOpen: (open: boolean) => void;
+    setPendingItemPlayId: Dispatch<SetStateAction<string | null>>;
+    setItemPlayPromptOpen: Dispatch<SetStateAction<boolean>>;
     pendingHeroPlayId: string | null;
     selectedHero: CardInstance | undefined;
     selectedHeroLocation: 'party' | 'hand' | null;
@@ -50,6 +51,8 @@ export default function HandCard({
     handleRollHeroAbility,
     playHeroRollResult
 }: HandCardProps) {
+    console.log("Hand card playHeroRollResult: ", playHeroRollResult, "pendingHeroPlayId: ", pendingHeroPlayId);
+
     return (
         <div className="panel panelHand">
             <h3>Your Hand ({gameState.players[myId].zones.hand.length} cards)</h3>
