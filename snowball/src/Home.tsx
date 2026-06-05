@@ -89,21 +89,7 @@ export default function Home() {
 
           <CreateNewRoomCard handleCreateRoom={handleCreateRoom} />
 
-          <div className="panel">
-            <h2>Join an existing room</h2>
-            <form onSubmit={handleJoinRoom}>
-              <input
-                type="text"
-                value={roomCode}
-                onChange={(event) => setRoomCode(event.target.value)}
-                placeholder="Room Code"
-                style={{ width: '100%', maxWidth: '240px', padding: '0.75rem', marginBottom: '0.75rem' }}
-              />
-              <button type="submit" className="primaryButton">
-                Join Room
-              </button>
-            </form>
-          </div>
+          <JoinExistingRoomCard roomCode={roomCode} setRoomCode={setRoomCode} handleJoinRoom={handleJoinRoom}/>
 
           {status && (
             <div style={{ marginTop: '1rem', color: '#333' }}>
