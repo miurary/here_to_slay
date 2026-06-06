@@ -10,6 +10,7 @@ interface PartyCardProps {
     setViewedItemId: (id: string | null) => void;
     setSelectedHeroLocation: (location: 'party' | 'hand') => void;
     setHeroRollResult: (result: string | null) => void;
+    isMyTurn: boolean;
 }
 
 export default function PartyCard({ 
@@ -20,7 +21,8 @@ export default function PartyCard({
     viewedItemId, 
     setViewedItemId, 
     setSelectedHeroLocation, 
-    setHeroRollResult 
+    setHeroRollResult,
+    isMyTurn,
 }: PartyCardProps) {
     return (
         <div className="panel panelParty">
@@ -38,12 +40,13 @@ export default function PartyCard({
                         key={card.instanceId}
                         onClick={(event) => {
                             event.stopPropagation();
+                            if (!isMyTurn) return;
                             setSelectedHeroId(card.instanceId);
                             setSelectedHeroLocation('party');
                             setHeroRollResult(null);
                         }}
                         className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
-                        style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff', cursor: 'pointer' }}
+                        style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff', cursor: isMyTurn ? 'pointer' : 'not-allowed' }}
                         >
                         <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
                         <div style={{ fontSize: '0.8rem', color: '#666' }}>{template?.class || 'Hero'}</div>
@@ -55,7 +58,7 @@ export default function PartyCard({
                         {card.equippedItem && (
                             <div style={{ marginTop: '0.5rem' }}>
                             <div style={{ fontSize: '0.75rem', color: '#333' }}>
-                                Equipped: <button type="button" onClick={(e) => { e.stopPropagation(); setViewedItemId(card.equippedItem ?? null); }} style={{ background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', padding: 0 }}>{equippedTemplate?.name || 'Item'}</button>
+                                Equipped: <button type="button" onClick={(e) => { e.stopPropagation(); if (!isMyTurn) return; setViewedItemId(card.equippedItem ?? null); }} style={{ background: 'none', border: 'none', color: isMyTurn ? '#007bff' : '#666', cursor: isMyTurn ? 'pointer' : 'not-allowed', padding: 0 }}>{equippedTemplate?.name || 'Item'}</button>
                             </div>
                             {viewedItemId === card.equippedItem && equippedTemplate && (
                                 <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '6px' }}>

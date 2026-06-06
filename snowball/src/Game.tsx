@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
-import type { ClientToServerEvents, ServerToClientEvents, GameState, PlayerState } from '../../shared/types';
+import type { AbilityPrompt, ClientToServerEvents, ServerToClientEvents, GameState, PlayerState } from '../../shared/types';
 import './App.css';
 
 import FirstRollCard from './components/game/FirstRollCard';
@@ -14,6 +14,7 @@ import PartyLeaderReviewCard from './components/game/PartyLeaderReviewCard';
 import RollCompleteCard from './components/game/RollCompleteCard';
 import EndTurnButton from './components/game/EndTurnButton';
 import MainDeckCard from './components/game/MainDeckCard';
+import DiscardPileCard from './components/game/DiscardPileCard';
 import ActiveMonstersSidebarCard from './components/game/ActiveMonstersSidebarCard';
 import OpponentInformationCard from './components/game/OpponentInformationCard';
 
@@ -30,6 +31,7 @@ export default function Game() {
   const MIN_ROLL_ANIMATION_MS = 3000;
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
+  const [showDiscardPile, setShowDiscardPile] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [justDrew, setJustDrew] = useState(false);
   const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
@@ -37,6 +39,8 @@ export default function Game() {
   const [heroRollResult, setHeroRollResult] = useState<string | null>(null);
   const [playHeroPromptOpen, setPlayHeroPromptOpen] = useState(false);
   const [pendingHeroPlayId, setPendingHeroPlayId] = useState<string | null>(null);
+  const [pendingHeroAbilityActivationId, setPendingHeroAbilityActivationId] = useState<string | null>(null);
+  const [abilityPrompt, setAbilityPrompt] = useState<AbilityPrompt | null>(null);
   const [playHeroRollResult, setPlayHeroRollResult] = useState<string | null>(null);
   const [isHeroRolling, setIsHeroRolling] = useState(false);
   const pendingHeroPlayIdRef = useRef<string | null>(pendingHeroPlayId);
@@ -44,6 +48,7 @@ export default function Game() {
   const selectedHeroLocationRef = useRef<'hand' | 'party' | null>(selectedHeroLocation);
   const heroRollAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(heroRollAnimationTimer);
   const isHeroRollingRef = useRef<boolean>(isHeroRolling);
+  const playHeroPromptOpenRef = useRef<boolean>(playHeroPromptOpen);
   const [selectedOpponentPartyId, setSelectedOpponentPartyId] = useState<string | null>(null);
   const [itemPlayPromptOpen, setItemPlayPromptOpen] = useState(false);
   const [pendingItemPlayId, setPendingItemPlayId] = useState<string | null>(null);
@@ -63,7 +68,8 @@ export default function Game() {
     selectedHeroLocationRef.current = selectedHeroLocation;
     heroRollAnimationTimerRef.current = heroRollAnimationTimer;
     isHeroRollingRef.current = isHeroRolling;
-  }, [pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling]);
+    playHeroPromptOpenRef.current = playHeroPromptOpen;
+  }, [pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling, playHeroPromptOpen]);
 
   useEffect(() => {
     if (!roomCode) {
@@ -104,6 +110,19 @@ export default function Game() {
       if (!rollAnimationTimer) {
         setIsRolling(false);
       }
+
+      // If a hero was just played via ability and is now in the party, show roll prompt
+      if (pendingHeroPlayIdRef.current) {
+        const myPlayer = state.players[clientId];
+        if (myPlayer) {
+          const heroInParty = myPlayer.zones.party.find((card) => card.instanceId === pendingHeroPlayIdRef.current);
+          if (heroInParty && !playHeroPromptOpenRef.current) {
+            setSelectedHeroId(pendingHeroPlayIdRef.current);
+            setSelectedHeroLocation('party');
+            setHeroRollResult(null);
+          }
+        }
+      }
     });
 
     client.on('heroRollResult', (result) => {
@@ -112,15 +131,35 @@ export default function Game() {
       if (result.heroInstanceId === pendingHeroPlayIdRef.current) {
         console.log("Setting play hero roll result");
         setPlayHeroRollResult(result.message);
+        setPendingHeroAbilityActivationId(result.success ? result.heroInstanceId : null);
       }
       if (result.heroInstanceId === selectedHeroIdRef.current && selectedHeroLocationRef.current === 'party') {
         console.log("Setting hero roll result");
         setHeroRollResult(result.message);
+        setPendingHeroAbilityActivationId(result.success ? result.heroInstanceId : null);
       }
       if (!heroRollAnimationTimerRef.current) {
         setIsHeroRolling(false);
       }
       console.log("is hero rolling: ", isHeroRollingRef.current);
+    });
+    client.on('abilityPrompt', (prompt) => {
+      setAbilityPrompt(prompt);
+      setActionMessage(null);
+    });
+    client.on('abilityResolution', (data) => {
+      setActionMessage(data.message);
+      setAbilityPrompt(null);
+      setPendingHeroAbilityActivationId(null);
+    });
+
+    client.on('heroPlayedFromAbility', (heroInstanceId: string) => {
+      setPendingHeroPlayId(heroInstanceId);
+    });
+
+    client.on('playerDiscarded', (data: { playerId: string; playerName?: string; cardInstanceId: string; cardName?: string }) => {
+      setActionMessage(`${data.playerName || 'A player'} discarded ${data.cardName || data.cardInstanceId}`);
+      setTimeout(() => setActionMessage(null), 3000);
     });
 
     client.on('actionFailed', (msg) => {
@@ -147,6 +186,11 @@ export default function Game() {
       client.off('pongClient');
       client.off('playersUpdated');
       client.off('stateUpdate');
+      client.off('heroRollResult');
+      client.off('abilityPrompt');
+      client.off('abilityResolution');
+      client.off('heroPlayedFromAbility');
+      client.off('playerDiscarded');
       client.off('actionFailed');
       client.off('cardDrawn');
       client.off('connect_error');
@@ -230,7 +274,20 @@ export default function Game() {
 
   const confirmPlayHero = () => {
     setPendingHeroPlayId(null);
+    setPendingHeroAbilityActivationId(null);
     setPlayHeroPromptOpen(false);
+  };
+
+  const handleActivateHeroAbility = (heroInstanceId: string) => {
+    if (!socket) return;
+    socket.emit('activateHeroAbility', heroInstanceId);
+    setPendingHeroAbilityActivationId(null);
+  };
+
+  const handleRespondToAbilityPrompt = (optionId: string) => {
+    if (!socket || !abilityPrompt) return;
+    socket.emit('respondToAbilityPrompt', abilityPrompt.promptId, optionId);
+    setAbilityPrompt(null);
   };
 
   const handlePlayHeroRoll = () => {
@@ -347,6 +404,7 @@ export default function Game() {
   const selectedHero = myPlayer?.zones.hand.find((card) => card.instanceId === selectedHeroId)
     ?? myPlayer?.zones.party.find((card) => card.instanceId === selectedHeroId);
   const selectedHeroAP = selectedHeroLocation === 'hand' ? myPlayer?.actionPoints ?? 0 : 0;
+  const isMyTurn = gameState?.status === 'in_progress' && gameState.activePlayerId === myId;
 
   return (
     <div className="appShell" onClick={() => setSelectedHeroId(null)}>
@@ -463,6 +521,7 @@ export default function Game() {
                     setViewedItemId={setViewedItemId}
                     setSelectedHeroLocation={setSelectedHeroLocation}
                     setHeroRollResult={setHeroRollResult}
+                    isMyTurn={isMyTurn}
                   />
 
                   <HandCard
@@ -487,7 +546,10 @@ export default function Game() {
                     handlePlayHeroRoll={handlePlayHeroRoll}
                     handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
                     handleRollHeroAbility={handleRollHeroAbility}
+                    handleActivateHeroAbility={handleActivateHeroAbility}
+                    pendingHeroAbilityActivationId={pendingHeroAbilityActivationId}
                     playHeroRollResult={playHeroRollResult}
+                    isMyTurn={isMyTurn}
                   />
                 </div>
                 
@@ -507,11 +569,39 @@ export default function Game() {
                   setShowDrawPrompt={setShowDrawPrompt}
                   handleDrawFromMain={handleDrawFromMain}
                 />
+
+                <DiscardPileCard
+                  gameState={gameState}
+                  myId={myId}
+                  setActionMessage={setActionMessage}
+                  showDiscardPile={showDiscardPile}
+                  setShowDiscardPile={setShowDiscardPile}
+                />
               </>
             )}
           </main>
 
           <aside className="sidebar">
+            {abilityPrompt && (
+              <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+                <div style={{ backgroundColor: 'white', padding: '1.5rem', borderRadius: '12px', width: 'min(90vw, 480px)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
+                  <h3 style={{ marginTop: 0 }}>Ability Prompt</h3>
+                  <p>{abilityPrompt.message}</p>
+                  <div style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}>
+                    {abilityPrompt.options.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => handleRespondToAbilityPrompt(option.id)}
+                        style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: 'none', backgroundColor: '#007bff', color: 'white', cursor: 'pointer' }}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             {gameState?.status === 'in_progress' && (
               <>
                 <ActiveMonstersSidebarCard gameState={gameState} />

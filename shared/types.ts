@@ -8,12 +8,33 @@ export interface HeroRollResult {
   message: string;
 }
 
+export interface AbilityPromptOption {
+  id: string;
+  label: string;
+  payload?: {
+    playerId?: string;
+    cardInstanceId?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface AbilityPrompt {
+  promptId: string;
+  heroInstanceId: string;
+  promptType: 'selectPlayer' | 'selectCard' | 'discardCard' | 'confirm';
+  message: string;
+  options: AbilityPromptOption[];
+  requesterId: string;
+}
+
 export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
   startGame: () => void;
   rollForFirst: () => void;
   rollHeroAbility: (heroInstanceId: string) => void;
+  activateHeroAbility: (heroInstanceId: string) => void;
+  respondToAbilityPrompt: (promptId: string, selectedOptionId: string) => void;
   continueGame: () => void;
   choosePartyLeader: (instanceId: string) => void;
   playHero: (instanceId: string) => void;
@@ -31,6 +52,9 @@ export interface ServerToClientEvents {
   actionFailed: (message: string) => void;
   cardDrawn: (card: { instanceId: string; templateId: string }) => void;
   heroRollResult: (result: HeroRollResult) => void;
+  abilityPrompt: (prompt: AbilityPrompt) => void;
+  abilityResolution: (data: { message: string; heroInstanceId: string }) => void;
+  heroPlayedFromAbility: (heroInstanceId: string) => void;
 }
 
 // need to fix clanker code
