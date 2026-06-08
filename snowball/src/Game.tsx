@@ -80,7 +80,7 @@ export default function Game() {
       return;
     }
 
-    const client = io('http://localhost:3001', {
+    const client = io(`${import.meta.env.VITE_API_URL}`, {
       auth: {
         roomCode,
         username: name || undefined,

@@ -2248,11 +2248,12 @@ app.get('/api/room/:roomCode', (req, res) => {
 });
 
 const httpServer = createServer(app);
+const API_URL = process.env.API_URL || 'http://localhost:5173';
 
 // Apply the types to the Socket Server
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: API_URL,
     methods: ["GET", "POST"]
   }
 });
@@ -3440,7 +3441,7 @@ io.on('connection', (socket: Socket) => {
     sendRoomUpdate();
   });
 });
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
