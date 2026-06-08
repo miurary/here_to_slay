@@ -2,13 +2,11 @@ import type { GameState } from "../../../../shared/types";
 
 interface DiscardPileCardProps {
   gameState: GameState | null;
-  myId: string;
-  setActionMessage: (msg: string | null) => void;
   showDiscardPile: boolean;
   setShowDiscardPile: (val: boolean) => void;
 }
 
-export default function DiscardPileCard({ gameState, myId, setActionMessage, showDiscardPile, setShowDiscardPile }: DiscardPileCardProps) {
+export default function DiscardPileCard({ gameState, showDiscardPile, setShowDiscardPile }: DiscardPileCardProps) {
   const count = gameState ? gameState.discardPile.length : 0;
 
   return (

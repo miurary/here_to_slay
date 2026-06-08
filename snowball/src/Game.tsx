@@ -52,11 +52,9 @@ export default function Game() {
   const [selectedOpponentPartyId, setSelectedOpponentPartyId] = useState<string | null>(null);
   const [itemPlayPromptOpen, setItemPlayPromptOpen] = useState(false);
   const [pendingItemPlayId, setPendingItemPlayId] = useState<string | null>(null);
-  const [isItemPlaying, setIsItemPlaying] = useState(false);
   const [cursedItemPlayPromptOpen, setCursedItemPlayPromptOpen] = useState(false);
   const [pendingCursedItemPlayId, setPendingCursedItemPlayId] = useState<string | null>(null);
   const [selectedTargetOpponentId, setSelectedTargetOpponentId] = useState<string | null>(null);
-  const [isCursedItemPlaying, setIsCursedItemPlaying] = useState(false);
   const [viewedItemId, setViewedItemId] = useState<string | null>(null);
   const [challengeResult, setChallengeResult] = useState<ChallengeResolvedData | null>(null);
   const [monsterAttackResult, setMonsterAttackResult] = useState<MonsterAttackResultData | null>(null);
@@ -103,7 +101,7 @@ export default function Game() {
       setPlayers(connectedPlayers);
     });
 
-    client.on('stateUpdate', (state) => {
+    client.on('stateUpdate', (state: GameState) => {
       setGameState(state);
       setStatus(`Game status: ${state.status}`);
 
@@ -115,12 +113,13 @@ export default function Game() {
       }
 
       // If a hero was just played via ability and is now in the party, show roll prompt
-      if (pendingHeroPlayIdRef.current) {
+      const pendingId = pendingHeroPlayIdRef.current;
+      if (pendingId) {
         const myPlayer = state.players[clientId];
         if (myPlayer) {
-          const heroInParty = myPlayer.zones.party.find((card) => card.instanceId === pendingHeroPlayIdRef.current);
+          const heroInParty = myPlayer.zones.party.find((card) => card.instanceId === pendingId);
           if (heroInParty && !playHeroPromptOpenRef.current) {
-            setSelectedHeroId(pendingHeroPlayIdRef.current);
+            setSelectedHeroId(pendingId);
             setSelectedHeroLocation('party');
             setHeroRollResult(null);
           }
@@ -354,7 +353,6 @@ export default function Game() {
     socket?.emit('playItem', pendingItemPlayId, targetHeroInstanceId);
     setItemPlayPromptOpen(false);
     setPendingItemPlayId(null);
-    setIsItemPlaying(false);
   };
 
   const handleCancelPlayItem = () => {
@@ -381,7 +379,6 @@ export default function Game() {
     setCursedItemPlayPromptOpen(false);
     setPendingCursedItemPlayId(null);
     setSelectedTargetOpponentId(null);
-    setIsCursedItemPlaying(false);
   };
 
   const handleCancelCursedItemPlay = () => {
@@ -687,8 +684,6 @@ export default function Game() {
 
                 <DiscardPileCard
                   gameState={gameState}
-                  myId={myId}
-                  setActionMessage={setActionMessage}
                   showDiscardPile={showDiscardPile}
                   setShowDiscardPile={setShowDiscardPile}
                 />
