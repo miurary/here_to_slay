@@ -11,6 +11,7 @@ interface HandCardProps {
     setSelectedHeroLocation: Dispatch<SetStateAction<'hand' | 'party' | null>>;
     setHeroRollResult: Dispatch<SetStateAction<string | null>>;
     handlePlayHero: (instanceId: string) => void;
+    handlePlayMagic: (instanceId: string) => void;
     handleInitiateCursedItemPlay: (instanceId: string) => void;
     setPendingItemPlayId: Dispatch<SetStateAction<string | null>>;
     setItemPlayPromptOpen: Dispatch<SetStateAction<boolean>>;
@@ -39,6 +40,7 @@ export default function HandCard({
     setSelectedHeroLocation, 
     setHeroRollResult,
     handlePlayHero,
+    handlePlayMagic,
     handleInitiateCursedItemPlay,
     setPendingItemPlayId,
     setItemPlayPromptOpen,
@@ -131,6 +133,30 @@ export default function HandCard({
                         >
                         Use Item
                         </button>
+                    )}
+                    {card.cardType === 'magic' && (
+                        <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            if (!isMyTurn) return;
+                            handlePlayMagic(card.instanceId);
+                        }}
+                        disabled={!isMyTurn}
+                        style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: !isMyTurn ? '#999' : '#8e44ad', color: 'white', border: 'none', borderRadius: '6px', cursor: !isMyTurn ? 'not-allowed' : 'pointer' }}
+                        >
+                        Play Magic
+                        </button>
+                    )}
+                    {card.cardType === 'challenge' && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: '#fff3cd', color: '#856404', border: '1px solid #ffc107', borderRadius: '6px', display: 'inline-block' }}>
+                        Reactive — plays during opponent's turn
+                        </div>
+                    )}
+                    {card.cardType === 'modifier' && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: '#e8f4fd', color: '#0c5460', border: '1px solid #bee5eb', borderRadius: '6px', display: 'inline-block' }}>
+                        Reactive — plays after any roll
+                        </div>
                     )}
                     {abilityText && (
                         <div style={{ fontSize: '0.65rem', color: '#333', marginTop: '0.5rem', fontStyle: 'italic', lineHeight: '1.3' }}>

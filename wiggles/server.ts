@@ -104,9 +104,52 @@ interface AbilityPromptRequest {
   options: AbilityPromptOption[];
   effect: any;
   remainingEffects: any[];
+  isItemTrigger?: boolean;
+  itemInstanceId?: string;
+  isMagicCard?: boolean;
+  isChallengePrompt?: boolean;
+  isMonsterEffect?: boolean;
+  isPartyLeaderAbility?: boolean;
 }
 
 const abilityPromptRequests = new Map<string, AbilityPromptRequest>();
+const heroesPlayedFromAbilityThisTurn = new Map<string, Set<string>>(); // roomCode → Set<heroInstanceId>
+
+interface PendingChallengeState {
+  pendingCardInstance: CardInstance;
+  pendingPlayerId: string;
+  pendingCardType: 'hero' | 'item' | 'magic';
+  itemTargetPlayerId?: string;
+  itemTargetHeroInstanceId?: string;
+  magicSteps?: any[];
+  eligibleChallengerIds: string[];
+  passedPlayerIds: Set<string>;
+  challengerId?: string;
+  challengeCardInstanceId?: string;
+  challengerRollBonus: number;
+}
+const pendingChallenges = new Map<string, PendingChallengeState>();
+
+interface ModifierPhaseState {
+  die1: number;
+  die2: number;
+  rawDiceTotal: number;
+  persistentBonus: number;
+  accumulatedModifier: number;
+  requiredRoll: number;
+  rollContext: 'HERO_ABILITY' | 'ATTACK_MONSTER';
+  rollType: 'hero_ability' | 'monster_attack';
+  heroInstanceId: string;
+  rollingPlayerId: string;
+  phase: 'roller_turn' | 'opponent_turn';
+  allOpponentsWithModifiers: string[];
+  opponentQueue: string[];
+  cardPlayedThisCycle: boolean;
+  modifiersPlayed: Array<{ playerName: string; cardName: string; amount: number; choiceLabel: string }>;
+  monsterInstanceId?: string;
+  lowerBound?: number;
+}
+const modifierPhases = new Map<string, ModifierPhaseState>();
 
 const getSocketByPlayerId = (playerId: string) => io.sockets.sockets.get(playerId);
 
@@ -156,7 +199,7 @@ const getPlayerRollBonus = (player: Player): number => {
   const modifiers = (player as any).temporaryModifiers as PlayerModifier[] | undefined;
   if (!Array.isArray(modifiers)) return 0;
   return modifiers.reduce((total, modifier) => {
-    if (modifier.modifierType === 'ROLL_BONUS' && typeof modifier.amount === 'number') {
+    if (modifier.modifierType === 'rollBonus' && typeof modifier.amount === 'number') {
       return total + modifier.amount;
     }
     return total;
@@ -181,13 +224,52 @@ const isOpponent = (playerId: string, activePlayerId: string) => playerId !== ac
 const getOpponentPlayerIds = (gameState: GameState, activePlayerId: string) =>
   Object.keys(gameState.players).filter((playerId) => playerId !== activePlayerId);
 
+const getHeroEffectiveClass = (gameState: GameState, player: Player, hero: CardInstance): string | undefined => {
+  const template = gameState.cardTemplates[hero.templateId] as any;
+  const baseClass = template?.class as string | undefined;
+  if (!hero.equippedItem) return baseClass;
+  const itemInstance = player.zones.party.find(c => c.instanceId === hero.equippedItem);
+  if (!itemInstance) return baseClass;
+  const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
+  const passives = itemTemplate?.passiveModifiers as Array<{stat: string; override?: string}> | undefined;
+  const classOverride = passives?.find(p => p.stat === 'class' && p.override);
+  return classOverride?.override ?? baseClass;
+};
+
+const WIN_CLASSES = ['berserker', 'warrior', 'bard', 'guardian', 'ranger', 'thief', 'wizard'];
+
+const checkWinCondition = (gameState: GameState, player: Player): boolean => {
+  // Condition 1: enough monsters slain
+  const slainCount = (player.slainMonsters ?? []).length;
+  if (slainCount >= (gameState.targetMonstersToWin ?? 3)) return true;
+
+  // Condition 2: one of each of the 7 party-leader classes represented in the party
+  const partyClasses = new Set(
+    player.zones.party
+      .map(card => getHeroEffectiveClass(gameState, player, card)?.toLowerCase())
+      .filter((c): c is string => c !== undefined)
+  );
+  return WIN_CLASSES.every(cls => partyClasses.has(cls));
+};
+
+const applyWinIfMet = (gameState: GameState, player: Player, playerId: string): boolean => {
+  if (gameState.status === 'finished') return true;
+  if (checkWinCondition(gameState, player)) {
+    gameState.status = 'finished';
+    (gameState as any).winnerId = playerId;
+    return true;
+  }
+  return false;
+};
+
 const promptForPlayerSelection = (
   sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
   gameState: GameState,
   heroInstanceId: string,
   effect: any,
   eligiblePlayerIds: string[],
-  message: string
+  message: string,
+  remainingEffects: any[] = []
 ) => {
   const options = eligiblePlayerIds.map((playerId) => ({
     id: playerId,
@@ -204,7 +286,7 @@ const promptForPlayerSelection = (
     message,
     options,
     effect,
-    remainingEffects: [],
+    remainingEffects,
   });
 };
 
@@ -214,7 +296,8 @@ const promptForCardSelection = (
   heroInstanceId: string,
   effect: any,
   cardOptions: CardInstance[],
-  message: string
+  message: string,
+  remainingEffects: any[] = []
 ) => {
   const options = cardOptions.map((card) => ({
     id: card.instanceId,
@@ -231,7 +314,7 @@ const promptForCardSelection = (
     message,
     options,
     effect,
-    remainingEffects: [],
+    remainingEffects,
   });
 };
 
@@ -245,15 +328,17 @@ const processHeroAbilityEffects = (
   responsePayload?: { playerId?: string; cardInstanceId?: string }
 ): string | undefined => {
   const messages: string[] = [];
-  for (const effect of effects) {
+  let promptCreated = false;
+
+  for (let i = 0; i < effects.length; i++) {
+    if (promptCreated) break;
+    const effect = effects[i];
+    const remainingAfterThis = effects.slice(i + 1);
     let effectResult: string | undefined;
+
     switch (effect.action) {
       case 'DRAW': {
-        // Skip DRAW if we're responding to a later effect's prompt (e.g., PLAY_FROM_HAND)
-        // to avoid re-executing it multiple times
-        if (responsePayload?.cardInstanceId) {
-          break;
-        }
+        if (responsePayload?.cardInstanceId) break; // skip re-execution when responding to a later prompt
         const amount = effect.amount ?? 1;
         const cards = drawCards(gameState.mainDeck, amount);
         player.zones.hand.push(...cards);
@@ -261,74 +346,99 @@ const processHeroAbilityEffects = (
         break;
       }
       case 'MOVE_CARD': {
-        const targetZone = effect.destination === 'hand' ? player.zones.hand : player.zones.discardPile;
-        const sourceZone = effect.source === 'discard_pile' ? gameState.discardPile : player.zones.discardPile;
+        const targetZone = effect.destination === 'hand' ? player.zones.hand
+          : effect.destination === 'party' ? player.zones.party
+          : gameState.discardPile;
+        const targetReq = (template as any).targetRequirement;
+
         if (responsePayload?.cardInstanceId) {
-          const card = moveCardBetweenZones(sourceZone, targetZone, responsePayload.cardInstanceId);
-          if (!card) {
-            return 'Could not move selected card.';
+          let sourceZone: CardInstance[];
+          if (responsePayload.playerId) {
+            const srcPlayer = gameState.players[responsePayload.playerId];
+            if (!srcPlayer) return 'Source player not found.';
+            sourceZone = targetReq?.zone === 'party' ? srcPlayer.zones.party : srcPlayer.zones.hand;
+          } else {
+            sourceZone = gameState.discardPile;
           }
+          const card = moveCardBetweenZones(sourceZone, targetZone, responsePayload.cardInstanceId);
+          if (!card) return 'Could not move selected card.';
           return `${gameState.cardTemplates[card.templateId]?.name || 'Card'} moved to ${effect.destination}.`;
         }
 
-        const candidates = sourceZone.filter((card) => {
-          if (effect.cardType && card.templateId) {
-            const template = gameState.cardTemplates[card.templateId];
-            return template?.type?.toLowerCase() === effect.cardType?.toLowerCase();
+        if (targetReq?.eligibility === 'opponent') {
+          const allCandidates: Array<{ card: CardInstance; ownerId: string }> = [];
+          for (const opId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
+            const opp = gameState.players[opId];
+            if (!opp) continue;
+            const zone: CardInstance[] = targetReq.zone === 'party' ? opp.zones.party : opp.zones.hand;
+            for (const card of zone) {
+              if (!targetReq.cardType || card.cardType === targetReq.cardType) {
+                allCandidates.push({ card, ownerId: opId });
+              }
+            }
           }
-          return true;
-        });
-
-        if (candidates.length === 0) {
-          return 'No valid cards available to move.';
+          if (allCandidates.length === 0) { effectResult = 'No valid cards available.'; break; }
+          const opponentOptions = allCandidates.map(({ card, ownerId }) => ({
+            id: card.instanceId,
+            label: `${gameState.cardTemplates[card.templateId]?.name || card.templateId} (${gameState.players[ownerId]?.username || 'opponent'})`,
+            payload: { cardInstanceId: card.instanceId, playerId: ownerId },
+          }));
+          emitAbilityPrompt(sourceSocket.id, {
+            promptId: buildPromptId(),
+            roomCode: sourceSocket.data.roomCode as string,
+            heroInstanceId: hero.instanceId,
+            sourcePlayerId: sourceSocket.id,
+            promptType: 'selectCard',
+            message: 'Choose a card.',
+            options: opponentOptions,
+            effect,
+            remainingEffects: remainingAfterThis,
+          });
+          promptCreated = true;
+          break;
         }
 
-        promptForCardSelection(sourceSocket, gameState, hero.instanceId, effect, candidates, 'Choose a card to move.');
+        const cardTypeFilter = targetReq?.cardType as string | undefined;
+        const candidates = gameState.discardPile.filter((card) =>
+          !cardTypeFilter || card.cardType === cardTypeFilter
+        );
+        if (candidates.length === 0) { effectResult = `No valid ${cardTypeFilter || ''} cards in the discard pile.`; break; }
+        promptForCardSelection(sourceSocket, gameState, hero.instanceId, effect, candidates, 'Choose a card to move.', remainingAfterThis);
+        promptCreated = true;
         break;
       }
       case 'PROMPT_DISCARD': {
-        // If this is a response to a previously emitted prompt, perform the discard now.
         if (responsePayload?.cardInstanceId) {
-          const card = moveCardBetweenZones(player.zones.hand, player.zones.discardPile, responsePayload.cardInstanceId);
-          if (!card) {
-            return 'Could not discard selected card.';
-          }
+          const card = moveCardBetweenZones(player.zones.hand, gameState.discardPile, responsePayload.cardInstanceId);
+          if (!card) return 'Could not discard selected card.';
           return `Discarded ${gameState.cardTemplates[card.templateId]?.name || card.templateId}.`;
         }
         if (effect.target === 'all_opponents') {
           for (const opponentId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
             const opponentSocket = getSocketByPlayerId(opponentId);
             if (!opponentSocket) continue;
-
             const opponent = gameState.players[opponentId];
             if (!opponent) continue;
-
-            // If the effect has a condition (e.g., HAS_CARD_IN_ZONE), skip opponents who don't meet it
             if (effect.condition && effect.condition.type === 'HAS_CARD_IN_ZONE') {
               const zone = effect.condition.zone as keyof typeof opponent.zones;
               const requiredClass = (effect.condition.class || effect.condition.cardClass) as string | undefined;
               const hasCard = !!opponent.zones[zone]?.some((card) => {
-                const tmpl = gameState.cardTemplates[card.templateId];
-                return requiredClass ? tmpl?.class?.toLowerCase() === requiredClass?.toLowerCase() : true;
+                return requiredClass ? getHeroEffectiveClass(gameState, opponent, card)?.toLowerCase() === requiredClass?.toLowerCase() : true;
               });
               if (!hasCard) {
-                // notify that this opponent is not affected
                 opponentSocket.emit('abilityResolution', { heroInstanceId: hero.instanceId, message: 'Not affected by this ability.' });
                 continue;
               }
             }
-
             const options = opponent.zones.hand.map((card) => ({
               id: card.instanceId,
               label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
               payload: { cardInstanceId: card.instanceId },
             }));
-
             if (options.length === 0) {
               opponentSocket.emit('abilityResolution', { heroInstanceId: hero.instanceId, message: 'No cards to discard.' });
               continue;
             }
-
             const promptId = buildPromptId();
             abilityPromptRequests.set(promptId, {
               promptId,
@@ -352,26 +462,21 @@ const processHeroAbilityEffects = (
           }
           return `Prompting opponents to discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`;
         }
-
         if (effect.target === 'selected_player') {
           if (responsePayload?.playerId) {
             const targetPlayer = gameState.players[responsePayload.playerId];
             if (!targetPlayer) return 'Selected player not found.';
-
             const targetSocket = getSocketByPlayerId(responsePayload.playerId);
             if (!targetSocket) return 'Selected player not connected.';
-
             const options = targetPlayer.zones.hand.map((card) => ({
               id: card.instanceId,
               label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
               payload: { cardInstanceId: card.instanceId },
             }));
-
             if (options.length === 0) {
               targetSocket.emit('abilityResolution', { heroInstanceId: hero.instanceId, message: 'No cards to discard.' });
               return `Player ${targetPlayer.username || 'Player'} has no cards to discard.`;
             }
-
             const promptId = buildPromptId();
             abilityPromptRequests.set(promptId, {
               promptId,
@@ -394,37 +499,57 @@ const processHeroAbilityEffects = (
             });
             return `Prompting ${targetPlayer.username || 'Player'} to discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`;
           }
-
           const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, sourceSocket.id));
-          if (eligiblePlayers.length === 0) {
-            return 'No eligible players available.';
-          }
-          promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player for this effect.');
+          if (eligiblePlayers.length === 0) return 'No eligible players available.';
+          promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player for this effect.', remainingAfterThis);
+          promptCreated = true;
           break;
         }
-
         return 'Unsupported discard target.';
       }
       case 'PROMPT_SACRIFICE': {
+        if (responsePayload?.cardInstanceId) {
+          const sacrificeIndex = player.zones.party.findIndex((c) => c.instanceId === responsePayload.cardInstanceId);
+          if (sacrificeIndex === -1) { effectResult = 'Selected card not found in party.'; break; }
+          const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
+          if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
+          gameState.discardPile.push(sacrificedCard);
+          const sacrificedName = gameState.cardTemplates[sacrificedCard.templateId]?.name || sacrificedCard.templateId;
+          let psMsg = `Sacrificed ${sacrificedName}.`;
+          if (sacrificedCard.cardType === 'hero' && sacrificedCard.equippedItem) {
+            const itemIndex = player.zones.party.findIndex((c) => c.instanceId === sacrificedCard.equippedItem);
+            if (itemIndex !== -1) {
+              const [psItem] = player.zones.party.splice(itemIndex, 1);
+              if (psItem) {
+                gameState.discardPile.push(psItem);
+                psMsg += ` ${gameState.cardTemplates[psItem.templateId]?.name || psItem.templateId} was also discarded.`;
+              }
+            }
+          }
+          if (sacrificedCard.cardType === 'item') {
+            const attachedHero = player.zones.party.find((c) => c.equippedItem === sacrificedCard.instanceId);
+            if (attachedHero) delete attachedHero.equippedItem;
+          }
+          effectResult = psMsg;
+          break;
+        }
         if (effect.target === 'all_opponents') {
           for (const opponentId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
             const opponentSocket = getSocketByPlayerId(opponentId);
             if (!opponentSocket) continue;
-
             const opponent = gameState.players[opponentId];
             if (!opponent) continue;
-
-            const options = opponent.zones.party.map((card) => ({
-              id: card.instanceId,
-              label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
-              payload: { cardInstanceId: card.instanceId },
-            }));
-
+            const options = opponent.zones.party
+              .filter((card) => card.cardType !== 'party_leader')
+              .map((card) => ({
+                id: card.instanceId,
+                label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
+                payload: { cardInstanceId: card.instanceId },
+              }));
             if (options.length === 0) {
-              opponentSocket.emit('abilityResolution', { heroInstanceId: hero.instanceId, message: 'No hero cards to sacrifice.' });
+              opponentSocket.emit('abilityResolution', { heroInstanceId: hero.instanceId, message: 'No cards to sacrifice.' });
               continue;
             }
-
             const promptId = buildPromptId();
             abilityPromptRequests.set(promptId, {
               promptId,
@@ -432,7 +557,7 @@ const processHeroAbilityEffects = (
               heroInstanceId: hero.instanceId,
               sourcePlayerId: sourceSocket.id,
               promptType: 'discardCard',
-              message: `Sacrifice a hero card from your party.`,
+              message: 'Sacrifice a card from your party.',
               options,
               effect,
               remainingEffects: [],
@@ -441,43 +566,76 @@ const processHeroAbilityEffects = (
               promptId,
               heroInstanceId: hero.instanceId,
               promptType: 'discardCard',
-              message: `Sacrifice a hero card from your party.`,
+              message: 'Sacrifice a card from your party.',
               options,
               requesterId: sourceSocket.id,
             });
           }
-          return `Prompting opponents to sacrifice a hero card.`;
+          return 'Prompting opponents to sacrifice a card.';
         }
         return 'Unsupported sacrifice target.';
       }
       case 'SLAY': {
-        if (effect.target === 'selected') {
-          const candidates = gameState.activeMonsters;
-          if (candidates.length === 0) return 'No monsters available to slay.';
-          promptForCardSelection(sourceSocket, gameState, hero.instanceId, effect, candidates, 'Choose a monster to SLAY.');
+        if (responsePayload?.cardInstanceId) {
+          const monsterIndex = gameState.activeMonsters.findIndex((m) => m.instanceId === responsePayload.cardInstanceId);
+          if (monsterIndex === -1) { effectResult = 'Monster not found.'; break; }
+          const [slain] = gameState.activeMonsters.splice(monsterIndex, 1);
+          if (!slain) { effectResult = 'Failed to slay monster.'; break; }
+          gameState.discardedMonsters.push(slain);
+          if (gameState.activeMonsters.length < 3 && gameState.monsterDeck.length > 0) {
+            gameState.activeMonsters.push(...(drawCards(gameState.monsterDeck, 1) as MonsterInstance[]));
+          }
+          effectResult = `Slew ${gameState.cardTemplates[slain.templateId]?.name || 'monster'}.`;
           break;
         }
-        return 'Unsupported SLAY target.';
+        if (effect.target === 'selected') {
+          if (gameState.activeMonsters.length === 0) { effectResult = 'No monsters available to slay.'; break; }
+          const slayOptions = gameState.activeMonsters.map((m) => ({
+            id: m.instanceId,
+            label: gameState.cardTemplates[m.templateId]?.name || m.templateId,
+            payload: { cardInstanceId: m.instanceId },
+          }));
+          emitAbilityPrompt(sourceSocket.id, {
+            promptId: buildPromptId(),
+            roomCode: sourceSocket.data.roomCode as string,
+            heroInstanceId: hero.instanceId,
+            sourcePlayerId: sourceSocket.id,
+            promptType: 'selectCard',
+            message: 'Choose a monster to SLAY.',
+            options: slayOptions,
+            effect,
+            remainingEffects: remainingAfterThis,
+          });
+          promptCreated = true;
+          break;
+        }
+        effectResult = 'Unsupported SLAY target.';
+        break;
       }
       case 'APPLY_ROOM_FLAG': {
-        // Room flags are not fully modeled yet, but we can note the ability activation.
-        return `Applied room flag: ${(effect.flag as string) || 'unknown'}.`;
+        const roomFlags = (gameState as any).roomFlags ?? {};
+        roomFlags[effect.flag as string] = true;
+        (gameState as any).roomFlags = roomFlags;
+        effectResult = `Applied: ${(effect.flag as string) || 'unknown'}.`;
+        break;
       }
       case 'APPLY_PLAYER_MODIFIER': {
         const playerModifiers = (player as any).temporaryModifiers ?? [];
-        playerModifiers.push({ modifierType: effect.modifierType, amount: effect.amount ?? 0, duration: effect.duration ?? 1 });
+        playerModifiers.push({ modifierType: effect.modifierType, amount: effect.amount ?? 0, duration: typeof effect.duration === 'number' ? effect.duration : 1 });
         (player as any).temporaryModifiers = playerModifiers;
-        return `Applied modifier: ${effect.modifierType} ${effect.amount}.`;
+        effectResult = `Applied modifier: ${effect.modifierType} ${effect.amount}.`;
+        break;
       }
       case 'VIEW_HAND': {
         if (responsePayload?.playerId) {
           const targetPlayer = gameState.players[responsePayload.playerId];
           if (!targetPlayer) return 'Player not found.';
           const cardNames = targetPlayer.zones.hand.map((card) => gameState.cardTemplates[card.templateId]?.name || card.templateId);
-          return `Player ${targetPlayer.username || 'Player'} has: ${cardNames.join(', ') || 'no cards'}.`;
+          return `${targetPlayer.username || 'Player'} has: ${cardNames.join(', ') || 'no cards'}.`;
         }
         const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, sourceSocket.id));
-        promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player whose hand to view.');
+        promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player whose hand to view.', remainingAfterThis);
+        promptCreated = true;
         break;
       }
       case 'STEAL_RANDOM_CARD': {
@@ -488,13 +646,11 @@ const processHeroAbilityEffects = (
             if (!opponent) return false;
             if (effect.condition.type === 'HAS_CARD_IN_ZONE') {
               return opponent.zones[effect.condition.zone as keyof typeof opponent.zones]?.some((card) => {
-                const template = gameState.cardTemplates[card.templateId];
-                return template?.class?.toLowerCase() === effect.condition.cardClass?.toLowerCase();
+                return getHeroEffectiveClass(gameState, opponent, card)?.toLowerCase() === effect.condition.cardClass?.toLowerCase();
               });
             }
             return true;
           });
-
           const stolenCards: string[] = [];
           for (const opponentId of opponents) {
             const opponent = gameState.players[opponentId];
@@ -506,43 +662,72 @@ const processHeroAbilityEffects = (
               stolenCards.push(gameState.cardTemplates[card.templateId]?.name || card.templateId);
             }
           }
-          return `Stole ${stolenCards.length} card${stolenCards.length === 1 ? '' : 's'}: ${stolenCards.join(', ')}.`;
+          effectResult = `Stole ${stolenCards.length} card${stolenCards.length === 1 ? '' : 's'}${stolenCards.length > 0 ? `: ${stolenCards.join(', ')}` : ''}.`;
+          break;
         }
-
         if (effect.target === 'target_owner' && responsePayload?.playerId) {
           const targetPlayer = gameState.players[responsePayload.playerId];
-          if (!targetPlayer || targetPlayer.zones.hand.length === 0) return 'No valid hand to steal from.';
+          if (!targetPlayer || targetPlayer.zones.hand.length === 0) { effectResult = 'No cards to steal.'; break; }
           const cardIndex = Math.floor(Math.random() * targetPlayer.zones.hand.length);
           const [card] = targetPlayer.zones.hand.splice(cardIndex, 1);
-          if (!card) return 'Failed to steal a card.';
+          if (!card) { effectResult = 'Failed to steal a card.'; break; }
           player.zones.hand.push(card);
-          return `Stole ${gameState.cardTemplates[card.templateId]?.name || card.templateId} from ${targetPlayer.username || 'player'}.`;
+          effectResult = `Stole ${gameState.cardTemplates[card.templateId]?.name || card.templateId} from ${targetPlayer.username || 'player'}.`;
+          break;
         }
-        return 'Unsupported steal action.';
+        effectResult = 'Unsupported steal action.';
+        break;
       }
       case 'PLAY_FROM_HAND': {
         const candidates = player.zones.hand.filter((card) => card.cardType === (effect.cardType as string));
-        if (candidates.length === 0) {
-          effectResult = `No ${effect.cardType} cards available to play.`;
-          break;
-        }
+        if (candidates.length === 0) { effectResult = `No ${effect.cardType} cards available to play.`; break; }
         if (responsePayload?.cardInstanceId) {
           const index = player.zones.hand.findIndex((card) => card.instanceId === responsePayload.cardInstanceId);
-          if (index === -1) {
-            effectResult = 'Selected card not found in hand.';
-            break;
-          }
+          if (index === -1) { effectResult = 'Selected card not found in hand.'; break; }
           const [card] = player.zones.hand.splice(index, 1);
-          if (!card) {
-            effectResult = 'Selected card not found in hand.';
-            break;
-          }
+          if (!card) { effectResult = 'Failed to play card from hand.'; break; }
           player.zones.party.push(card);
+          applyWinIfMet(gameState, player, sourceSocket.id);
+          const roomCode = sourceSocket.data.roomCode as string;
+          if (!heroesPlayedFromAbilityThisTurn.has(roomCode)) heroesPlayedFromAbilityThisTurn.set(roomCode, new Set());
+          heroesPlayedFromAbilityThisTurn.get(roomCode)!.add(card.instanceId);
           sourceSocket.emit('heroPlayedFromAbility', card.instanceId);
           effectResult = `Played ${gameState.cardTemplates[card.templateId]?.name || card.templateId} from your hand.`;
           break;
         }
-        promptForCardSelection(sourceSocket, gameState, hero.instanceId, effect, candidates, 'Choose a hero card from your hand to play.');
+        promptForCardSelection(sourceSocket, gameState, hero.instanceId, effect, candidates, 'Choose a hero card from your hand to play.', remainingAfterThis);
+        promptCreated = true;
+        break;
+      }
+      case 'SACRIFICE': {
+        if (!responsePayload?.cardInstanceId) { effectResult = 'No card selected for sacrifice.'; break; }
+        const sacrificeIndex = player.zones.party.findIndex((c) => c.instanceId === responsePayload.cardInstanceId);
+        if (sacrificeIndex === -1) { effectResult = 'Selected card not found in party.'; break; }
+        const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
+        if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
+        gameState.discardPile.push(sacrificedCard);
+        const sacrificedName = gameState.cardTemplates[sacrificedCard.templateId]?.name || sacrificedCard.templateId;
+        let sacrificeMsg = `Sacrificed ${sacrificedName}.`;
+        if (sacrificedCard.cardType === 'hero' && sacrificedCard.equippedItem) {
+          const itemIndex = player.zones.party.findIndex((c) => c.instanceId === sacrificedCard.equippedItem);
+          if (itemIndex !== -1) {
+            const [sacrificedItem] = player.zones.party.splice(itemIndex, 1);
+            if (sacrificedItem) {
+              gameState.discardPile.push(sacrificedItem);
+              sacrificeMsg += ` ${gameState.cardTemplates[sacrificedItem.templateId]?.name || sacrificedItem.templateId} was also discarded.`;
+            }
+          }
+        }
+        if (sacrificedCard.cardType === 'item') {
+          const attachedHero = player.zones.party.find((c) => c.equippedItem === sacrificedCard.instanceId);
+          if (attachedHero) delete attachedHero.equippedItem;
+        }
+        effectResult = sacrificeMsg;
+        break;
+      }
+      case 'FORCE_END_TURN': {
+        (gameState as any).forceEndTurn = sourceSocket.id;
+        effectResult = 'Ending turn.';
         break;
       }
       default:
@@ -558,6 +743,769 @@ const processHeroAbilityEffects = (
     return messages.join(' ');
   }
   return undefined;
+};
+
+const emitItemTriggerPrompt = (
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  hero: CardInstance,
+  itemInstance: CardInstance,
+  itemTemplate: any,
+  sendRoomUpdate: () => void
+): boolean => {
+  const trigger = itemTemplate.trigger as { event: string; optional?: boolean; effects: any[] } | undefined;
+  if (!trigger) return false;
+  const effectAction = trigger.effects[0]?.action as string | undefined;
+  if (!effectAction) return false;
+
+  switch (effectAction) {
+    case 'REROLL_HERO_ABILITY': {
+      emitAbilityPrompt(socket.id, {
+        promptId: buildPromptId(),
+        roomCode: socket.data.roomCode as string,
+        heroInstanceId: hero.instanceId,
+        sourcePlayerId: socket.id,
+        promptType: 'confirm',
+        message: `${itemTemplate.name}: Sacrifice this item to reroll the hero ability?`,
+        options: [
+          { id: 'use', label: `Yes, sacrifice ${itemTemplate.name}` },
+          { id: 'skip', label: 'No, skip' },
+        ],
+        effect: { action: 'ITEM_GOBLET_CONFIRM' },
+        remainingEffects: [],
+        isItemTrigger: true,
+        itemInstanceId: itemInstance.instanceId,
+      });
+      sendRoomUpdate();
+      return true;
+    }
+    case 'PROMPT_SACRIFICE_HERO': {
+      const heroOptions = player.zones.party
+        .filter(c => c.cardType === 'hero')
+        .map(c => ({
+          id: c.instanceId,
+          label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+          payload: { cardInstanceId: c.instanceId },
+        }));
+      if (heroOptions.length === 0) return false;
+      emitAbilityPrompt(socket.id, {
+        promptId: buildPromptId(),
+        roomCode: socket.data.roomCode as string,
+        heroInstanceId: hero.instanceId,
+        sourcePlayerId: socket.id,
+        promptType: 'selectCard',
+        message: `${itemTemplate.name}: You must SACRIFICE a Hero card.`,
+        options: heroOptions,
+        effect: { action: 'ITEM_SACRIFICE_HERO' },
+        remainingEffects: [],
+        isItemTrigger: true,
+        itemInstanceId: itemInstance.instanceId,
+      });
+      sendRoomUpdate();
+      return true;
+    }
+    case 'DISCARD': {
+      const cardOptions = player.zones.hand.map(c => ({
+        id: c.instanceId,
+        label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+        payload: { cardInstanceId: c.instanceId },
+      }));
+      if (cardOptions.length === 0) return false;
+      emitAbilityPrompt(socket.id, {
+        promptId: buildPromptId(),
+        roomCode: socket.data.roomCode as string,
+        heroInstanceId: hero.instanceId,
+        sourcePlayerId: socket.id,
+        promptType: 'discardCard',
+        message: `${itemTemplate.name}: You must DISCARD a card.`,
+        options: cardOptions,
+        effect: { action: 'ITEM_COIN_DISCARD' },
+        remainingEffects: [],
+        isItemTrigger: true,
+        itemInstanceId: itemInstance.instanceId,
+      });
+      sendRoomUpdate();
+      return true;
+    }
+    default:
+      return false;
+  }
+};
+
+const checkMonsterRequirements = (gameState: GameState, player: Player, monsterTemplate: any): { met: boolean; missing: string } => {
+  const reqs = (monsterTemplate.requirements as Array<{ class: string; amount: number }> | undefined) ?? [];
+  for (const req of reqs) {
+    const classLower = req.class.toLowerCase();
+    if (classLower === 'hero') {
+      const count = player.zones.party.filter(c => c.cardType === 'hero').length;
+      if (count < req.amount) return { met: false, missing: `${req.amount} hero card${req.amount > 1 ? 's' : ''} in party (have ${count})` };
+    } else {
+      const count = player.zones.party.filter(c => {
+        const effectiveClass = getHeroEffectiveClass(gameState, player, c);
+        return effectiveClass?.toLowerCase() === classLower;
+      }).length;
+      if (count < req.amount) return { met: false, missing: `${req.amount} ${req.class} hero${req.amount > 1 ? 's' : ''} in party (have ${count})` };
+    }
+  }
+  return { met: true, missing: '' };
+};
+
+const getPartyLeaderHeroAbilityBonus = (gameState: GameState, playerId: string): number => {
+  const player = gameState.players[playerId];
+  if (!player?.partyLeaderId) return 0;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  if (
+    leaderTemplate?.effect?.triggerEvent === 'ON_HERO_ABILITY_ROLL' &&
+    leaderTemplate.effect.action === 'PERSISTENT_MODIFIER' &&
+    leaderTemplate.effect.applies_to === 'HERO_ABILITY_ROLLS'
+  ) return (leaderTemplate.effect.modifier as number) ?? 0;
+  return 0;
+};
+
+const getSlainMonsterHeroAbilityBonus = (gameState: GameState, player: Player): number =>
+  (player.slainMonsters ?? []).reduce((total, m) => {
+    const t = gameState.cardTemplates[m.templateId] as any;
+    if (
+      t?.slainEffect?.action === 'PERSISTENT_MODIFIER' &&
+      t.slainEffect.applies_to === 'HERO_ABILITY_ROLLS'
+    ) return total + ((t.slainEffect.modifier as number) ?? 0);
+    return total;
+  }, 0);
+
+const getMonsterAttackRollBonus = (gameState: GameState, player: Player): number => {
+  if (!player.partyLeaderId) return 0;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  if (
+    leaderTemplate?.effect?.triggerEvent === 'ON_ATTACK_ROLL' &&
+    leaderTemplate.effect.action === 'APPLY_ROLL_MODIFIER'
+  ) return (leaderTemplate.effect.amount as number) ?? 0;
+  return 0;
+};
+
+const playerHasSlainEffectFlag = (gameState: GameState, player: Player, flag: string): boolean =>
+  (player.slainMonsters ?? []).some(m => {
+    const t = gameState.cardTemplates[m.templateId] as any;
+    return t?.slainEffect?.flag === flag;
+  });
+
+const getOpponentsWithModifiers = (gameState: GameState, rollingPlayerId: string): string[] =>
+  Object.entries(gameState.players)
+    .filter(([pid]) => pid !== rollingPlayerId)
+    .filter(([, p]) => p.zones.hand.some(c => c.cardType === 'modifier'))
+    .map(([pid]) => pid);
+
+const getModifierAmount = (template: any, choiceIndex: number, rollContext: string): number => {
+  const choices = template?.choices as any[] | undefined;
+  if (choices) {
+    const choice = choices[choiceIndex];
+    if (!choice) return 0;
+    const upgrades = choice.conditionalUpgrades as any[] | undefined;
+    if (upgrades) {
+      for (const upgrade of upgrades) {
+        if (upgrade.condition?.rollContext === rollContext) {
+          return (upgrade.effects?.[0]?.amount as number) ?? 0;
+        }
+      }
+    }
+    return (choice.effects?.[0]?.amount as number) ?? 0;
+  }
+  return (template?.effects?.[0]?.amount as number) ?? 0;
+};
+
+const getModifierChoiceLabel = (template: any, choiceIndex: number, rollContext: string): string => {
+  const choices = template?.choices as any[] | undefined;
+  if (choices) {
+    const choice = choices[choiceIndex];
+    if (!choice) return '?';
+    const upgrades = choice.conditionalUpgrades as any[] | undefined;
+    if (upgrades) {
+      for (const upgrade of upgrades) {
+        if (upgrade.condition?.rollContext === rollContext) return (upgrade.label as string) ?? choice.label;
+      }
+    }
+    return (choice.label as string) ?? '?';
+  }
+  const amount = (template?.effects?.[0]?.amount as number) ?? 0;
+  return amount >= 0 ? `+${amount}` : `${amount}`;
+};
+
+const updateModifierPhaseGameState = (_roomCode: string, phase: ModifierPhaseState, gameState: GameState) => {
+  const currentTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
+  const activePlayerId = phase.phase === 'roller_turn' ? phase.rollingPlayerId : (phase.opponentQueue[0] ?? '');
+  (gameState as any).modifierPhase = {
+    heroInstanceId: phase.heroInstanceId,
+    rollingPlayerId: phase.rollingPlayerId,
+    requiredRoll: phase.requiredRoll,
+    currentTotal,
+    die1: phase.die1,
+    die2: phase.die2,
+    persistentBonus: phase.persistentBonus,
+    accumulatedModifier: phase.accumulatedModifier,
+    phase: phase.phase,
+    activePlayerId,
+    rollContext: phase.rollContext,
+    rollType: phase.rollType,
+    monsterName: (gameState.cardTemplates[phase.monsterInstanceId ?? ''] as any)?.name,
+    lowerBound: phase.lowerBound,
+    modifiersPlayed: phase.modifiersPlayed,
+  };
+};
+
+// All slain effects (EXTRA_AP, blockItemChallenges, PERSISTENT_MODIFIER) are read
+// dynamically from player.slainMonsters at the point of use — no extra setup needed here.
+const applySlainEffect = (_roomCode: string, _gameState: GameState, _player: Player, _monsterTemplate: any) => {};
+
+const promptMonsterDiscard = (
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  monsterInstanceId: string,
+  monsterName: string,
+  remaining: number,
+  finalRoll: number,
+  effectText: string,
+  sendRoomUpdate: () => void
+) => {
+  const opts = player.zones.hand.map(c => ({
+    id: c.instanceId,
+    label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+    payload: { cardInstanceId: c.instanceId },
+  }));
+  emitAbilityPrompt(socket.id, {
+    promptId: buildPromptId(),
+    roomCode: socket.data.roomCode as string,
+    heroInstanceId: monsterInstanceId,
+    sourcePlayerId: socket.id,
+    promptType: 'discardCard',
+    message: `Discard ${remaining} card${remaining > 1 ? 's' : ''} (monster penalty).`,
+    options: opts,
+    effect: { action: 'MONSTER_DISCARD', remaining, monsterName, finalRoll, effectText },
+    remainingEffects: [],
+    isMonsterEffect: true,
+  });
+  sendRoomUpdate();
+};
+
+const promptMonsterSacrifice = (
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  monsterInstanceId: string,
+  monsterName: string,
+  finalRoll: number,
+  effectText: string,
+  sendRoomUpdate: () => void
+) => {
+  const heroOptions = player.zones.party
+    .filter(c => c.cardType === 'hero')
+    .map(c => ({
+      id: c.instanceId,
+      label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+      payload: { cardInstanceId: c.instanceId },
+    }));
+  if (heroOptions.length === 0) { sendRoomUpdate(); return; }
+  emitAbilityPrompt(socket.id, {
+    promptId: buildPromptId(),
+    roomCode: socket.data.roomCode as string,
+    heroInstanceId: monsterInstanceId,
+    sourcePlayerId: socket.id,
+    promptType: 'selectCard',
+    message: 'Sacrifice a Hero card (monster penalty).',
+    options: heroOptions,
+    effect: { action: 'MONSTER_SACRIFICE_HERO', monsterName, finalRoll, effectText },
+    remainingEffects: [],
+    isMonsterEffect: true,
+  });
+  sendRoomUpdate();
+};
+
+const applyMonsterAttackEffects = (
+  roomCode: string,
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  monster: MonsterInstance,
+  monsterTemplate: any,
+  finalTotal: number,
+  sendRoomUpdate: () => void
+) => {
+  const upperBound = (monsterTemplate.upperBound as number) ?? 99;
+  const lowerBound = (monsterTemplate.lowerBound as number) ?? 0;
+  const monsterName = (monsterTemplate.name as string) ?? monster.templateId;
+
+  let effects: any[] = [];
+  let effectText = '';
+
+  if (finalTotal >= upperBound) {
+    effects = (monsterTemplate.upperBoundEffect as any[]) ?? [];
+    effectText = (monsterTemplate.upperBoundText as string) ?? '';
+  } else if (finalTotal < lowerBound) {
+    effects = (monsterTemplate.lowerBoundEffect as any[]) ?? [];
+    effectText = (monsterTemplate.lowerBoundText as string) ?? '';
+  }
+
+  // Broadcast result immediately before any prompts
+  io.to(roomCode).emit('monsterAttackResult', {
+    attackerName: player.username ?? socket.id,
+    monsterName,
+    roll: finalTotal,
+    requiredRoll: upperBound,
+    slew: finalTotal >= upperBound,
+    effectText: effectText || 'Nothing happens.',
+  });
+
+  for (const effect of effects) {
+    if (effect.action === 'SLAY') {
+      const monsterIdx = gameState.activeMonsters.findIndex(m => m.instanceId === monster.instanceId);
+      if (monsterIdx !== -1) {
+        const [slainMonster] = gameState.activeMonsters.splice(monsterIdx, 1);
+        if (slainMonster) {
+          player.slainMonsters = player.slainMonsters ?? [];
+          player.slainMonsters.push(slainMonster);
+          // p_001 Raging Manticore: draw N cards on slay
+          if (player.partyLeaderId) {
+            const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+            if (plTemplate?.effect?.triggerEvent === 'ON_SLAY' && plTemplate.effect.action === 'DRAW') {
+              const drawCount = (plTemplate.effect.amount as number) ?? 1;
+              player.zones.hand.push(...drawCards(gameState.mainDeck, drawCount));
+            }
+          }
+          if (gameState.monsterDeck.length > 0) {
+            const [replacement] = gameState.monsterDeck.splice(0, 1);
+            if (replacement) gameState.activeMonsters.push(replacement as MonsterInstance);
+          }
+          applySlainEffect(roomCode, gameState, player, monsterTemplate);
+        }
+      }
+    } else if (effect.action === 'DRAW') {
+      const amount = (effect.amount as number) ?? 1;
+      player.zones.hand.push(...drawCards(gameState.mainDeck, amount));
+    } else if (effect.action === 'DISCARD') {
+      const amount = effect.amount as number;
+      if (amount < 0 || player.zones.hand.length <= amount) {
+        gameState.discardPile.push(...player.zones.hand);
+        player.zones.hand = [];
+      } else {
+        promptMonsterDiscard(socket, gameState, player, monster.instanceId, monsterName, amount, finalTotal, effectText, sendRoomUpdate);
+        return;
+      }
+    } else if (effect.action === 'SACRIFICE') {
+      promptMonsterSacrifice(socket, gameState, player, monster.instanceId, monsterName, finalTotal, effectText, sendRoomUpdate);
+      return;
+    }
+  }
+
+  applyWinIfMet(gameState, player, socket.id);
+
+  sendRoomUpdate();
+};
+
+const executeMonsterAttackRoll = (
+  roomCode: string,
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  monster: MonsterInstance,
+  monsterTemplate: any,
+  sendRoomUpdate: () => void
+) => {
+  const die1 = Math.floor(Math.random() * 6) + 1;
+  const die2 = Math.floor(Math.random() * 6) + 1;
+  const attackBonus = getMonsterAttackRollBonus(gameState, player);
+  const rawDiceTotal = die1 + die2;
+  const currentTotal = rawDiceTotal + attackBonus;
+  const upperBound = (monsterTemplate.upperBound as number) ?? 99;
+  const lowerBound = (monsterTemplate.lowerBound as number) ?? 0;
+  const monsterName = (monsterTemplate.name as string) ?? monster.templateId;
+
+  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
+  const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
+  const rollerNeedsPrompt = currentTotal < upperBound && rollerHasModifiers;
+
+  const success = currentTotal >= upperBound;
+  const statusWord = success ? 'Hit!' : currentTotal < lowerBound ? 'Penalty!' : 'Miss.';
+  const message = `Attacked ${monsterName}: Rolled ${die1} + ${die2}${attackBonus ? ` + ${attackBonus}` : ''} = ${currentTotal}. ${statusWord} (need ${upperBound} to slay).`;
+  socket.emit('heroRollResult', { heroInstanceId: monster.instanceId, die1, die2, total: currentTotal, requiredRoll: upperBound, success, message });
+
+  if (!rollerNeedsPrompt && opponentsWithModifiers.length === 0) {
+    applyMonsterAttackEffects(roomCode, socket, gameState, player, monster, monsterTemplate, currentTotal, sendRoomUpdate);
+    return;
+  }
+
+  const initialPhase: 'roller_turn' | 'opponent_turn' = rollerNeedsPrompt ? 'roller_turn' : 'opponent_turn';
+  const phaseState: ModifierPhaseState = {
+    die1, die2, rawDiceTotal,
+    persistentBonus: attackBonus,
+    accumulatedModifier: 0,
+    requiredRoll: upperBound,
+    rollContext: 'ATTACK_MONSTER',
+    rollType: 'monster_attack',
+    heroInstanceId: monster.instanceId,
+    rollingPlayerId: socket.id,
+    phase: initialPhase,
+    allOpponentsWithModifiers: opponentsWithModifiers,
+    opponentQueue: [...opponentsWithModifiers],
+    cardPlayedThisCycle: false,
+    modifiersPlayed: [],
+    monsterInstanceId: monster.instanceId,
+    lowerBound,
+  };
+
+  modifierPhases.set(roomCode, phaseState);
+  updateModifierPhaseGameState(roomCode, phaseState, gameState);
+  sendRoomUpdate();
+};
+
+const finalizeRoll = (
+  roomCode: string,
+  phase: ModifierPhaseState,
+  gameState: GameState,
+  sendRoomUpdate: () => void
+) => {
+  const finalTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
+
+  modifierPhases.delete(roomCode);
+  delete (gameState as any).modifierPhase;
+
+  if (phase.rollType === 'monster_attack') {
+    const monster = gameState.activeMonsters.find(m => m.instanceId === phase.monsterInstanceId);
+    const player = gameState.players[phase.rollingPlayerId];
+    const rollingSocket = getSocketByPlayerId(phase.rollingPlayerId);
+    if (monster && player && rollingSocket) {
+      const monsterTemplate = gameState.cardTemplates[monster.templateId] as any;
+      applyMonsterAttackEffects(roomCode, rollingSocket as any, gameState, player, monster, monsterTemplate, finalTotal, sendRoomUpdate);
+    } else {
+      sendRoomUpdate();
+    }
+    return;
+  }
+
+  // hero_ability path
+  const success = finalTotal >= phase.requiredRoll;
+  const { die1, die2, persistentBonus, accumulatedModifier } = phase;
+  const parts: string[] = [`Rolled ${die1} + ${die2}`];
+  if (persistentBonus) parts.push(`+ ${persistentBonus}`);
+  if (accumulatedModifier) parts.push(accumulatedModifier >= 0 ? `+ ${accumulatedModifier} (modifiers)` : `- ${Math.abs(accumulatedModifier)} (modifiers)`);
+  parts.push(`= ${finalTotal}`);
+  const message = `${parts.join(' ')}. ${success ? 'Success!' : 'Failed.'} (needed ${phase.requiredRoll}).`;
+
+  const rollingSocket = getSocketByPlayerId(phase.rollingPlayerId);
+  if (rollingSocket) {
+    rollingSocket.emit('heroRollResult', {
+      heroInstanceId: phase.heroInstanceId,
+      die1, die2,
+      total: finalTotal,
+      requiredRoll: phase.requiredRoll,
+      success,
+      message,
+    });
+
+    const player = gameState.players[phase.rollingPlayerId];
+    const hero = player?.zones.party.find(c => c.instanceId === phase.heroInstanceId);
+    if (player && hero) {
+      const equippedItemId = hero.equippedItem;
+      if (equippedItemId) {
+        const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
+        if (itemInstance) {
+          const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
+          const itemTrigger = itemTemplate?.trigger as { event: string; scope: string } | undefined;
+          if (itemTrigger?.scope === 'equipped_hero') {
+            if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
+              if (emitItemTriggerPrompt(rollingSocket as any, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+            }
+            if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
+              if (emitItemTriggerPrompt(rollingSocket as any, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  sendRoomUpdate();
+};
+
+const advanceModifierQueue = (
+  roomCode: string,
+  phase: ModifierPhaseState,
+  gameState: GameState,
+  sendRoomUpdate: () => void
+) => {
+  phase.opponentQueue.shift();
+
+  if (phase.opponentQueue.length > 0) {
+    updateModifierPhaseGameState(roomCode, phase, gameState);
+    sendRoomUpdate();
+    return;
+  }
+
+  if (phase.cardPlayedThisCycle) {
+    const newQueue = phase.allOpponentsWithModifiers.filter(
+      pid => gameState.players[pid]?.zones.hand.some(c => c.cardType === 'modifier')
+    );
+    if (newQueue.length === 0) {
+      finalizeRoll(roomCode, phase, gameState, sendRoomUpdate);
+    } else {
+      phase.opponentQueue = newQueue;
+      phase.cardPlayedThisCycle = false;
+      updateModifierPhaseGameState(roomCode, phase, gameState);
+      sendRoomUpdate();
+    }
+  } else {
+    finalizeRoll(roomCode, phase, gameState, sendRoomUpdate);
+  }
+};
+
+const executeRollAndEmit = (
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  hero: CardInstance,
+  preRollBonus: number,
+  sendRoomUpdate: () => void
+) => {
+  const template = gameState.cardTemplates[hero.templateId];
+  const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
+  const die1 = Math.floor(Math.random() * 6) + 1;
+  const die2 = Math.floor(Math.random() * 6) + 1;
+  const persistentBonus = getPlayerRollBonus(player) + preRollBonus
+    + getPartyLeaderHeroAbilityBonus(gameState, socket.id)
+    + getSlainMonsterHeroAbilityBonus(gameState, player);
+  const rawDiceTotal = die1 + die2;
+  const currentTotal = rawDiceTotal + persistentBonus;
+  const roomCode = socket.data.roomCode as string;
+
+  hero.effectUsedThisTurn = true;
+
+  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
+  const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
+  const rollerNeedsPrompt = currentTotal < requiredRoll && rollerHasModifiers;
+
+  if (!rollerNeedsPrompt && opponentsWithModifiers.length === 0) {
+    const success = currentTotal >= requiredRoll;
+    const message = `Rolled ${die1} + ${die2}${persistentBonus ? ` + ${persistentBonus}` : ''} = ${currentTotal}. ${success ? 'Success!' : 'Failed.'} (needed ${requiredRoll}).`;
+    socket.emit('heroRollResult', { heroInstanceId: hero.instanceId, die1, die2, total: currentTotal, requiredRoll, success, message });
+
+    const equippedItemId = hero.equippedItem;
+    if (equippedItemId) {
+      const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
+      if (itemInstance) {
+        const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
+        const itemTrigger = itemTemplate?.trigger as { event: string; scope: string } | undefined;
+        if (itemTrigger?.scope === 'equipped_hero') {
+          if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
+            if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+          }
+          if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
+            if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+          }
+        }
+      }
+    }
+    sendRoomUpdate();
+    return;
+  }
+
+  const initialPhase: 'roller_turn' | 'opponent_turn' = rollerNeedsPrompt ? 'roller_turn' : 'opponent_turn';
+  const phaseState: ModifierPhaseState = {
+    die1, die2, rawDiceTotal, persistentBonus,
+    accumulatedModifier: 0, requiredRoll,
+    rollContext: 'HERO_ABILITY',
+    rollType: 'hero_ability',
+    heroInstanceId: hero.instanceId, rollingPlayerId: socket.id,
+    phase: initialPhase,
+    allOpponentsWithModifiers: opponentsWithModifiers,
+    opponentQueue: [...opponentsWithModifiers],
+    cardPlayedThisCycle: false, modifiersPlayed: [],
+  };
+
+  const success = currentTotal >= requiredRoll;
+  const statusWord = success ? 'Succeeding…' : 'Failing…';
+  const message = `Rolled ${die1} + ${die2}${persistentBonus ? ` + ${persistentBonus}` : ''} = ${currentTotal}. ${statusWord} (needed ${requiredRoll}).`;
+  socket.emit('heroRollResult', { heroInstanceId: hero.instanceId, die1, die2, total: currentTotal, requiredRoll, success, message });
+
+  modifierPhases.set(roomCode, phaseState);
+  updateModifierPhaseGameState(roomCode, phaseState, gameState);
+  sendRoomUpdate();
+};
+
+const getEligibleChallengerIds = (gameState: GameState, activePlayerId: string): string[] =>
+  Object.entries(gameState.players)
+    .filter(([pid]) => pid !== activePlayerId)
+    .filter(([, player]) =>
+      player.zones.hand.some(card => {
+        if (card.cardType !== 'challenge') return false;
+        const template = gameState.cardTemplates[card.templateId] as any;
+        const req = template?.onEvent?.requirement;
+        if (!req) return true;
+        if (req.cardType === 'hero' && req.class && req.eligibility === 'self') {
+          return player.zones.party.some(
+            partyCard => getHeroEffectiveClass(gameState, player, partyCard) === req.class
+          );
+        }
+        return true;
+      })
+    )
+    .map(([pid]) => pid);
+
+const getChallengeCardBonus = (template: any): number => {
+  const effects = template?.onEvent?.effects as any[] | undefined;
+  if (!effects) return 0;
+  const modifyRoll = effects.find((e: any) => e.action === 'MODIFY_ROLL');
+  return (modifyRoll?.amount as number) ?? 0;
+};
+
+const getPartyLeaderChallengeBonus = (gameState: GameState, playerId: string): number => {
+  const player = gameState.players[playerId];
+  if (!player?.partyLeaderId) return 0;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  if (
+    leaderTemplate?.effect?.triggerEvent === 'ON_CHALLENGE' &&
+    leaderTemplate.effect.action === 'PERSISTENT_MODIFIER' &&
+    leaderTemplate.effect.applies_to === 'CHALLENGE_ROLLS'
+  ) {
+    return (leaderTemplate.effect.modifier as number) ?? 0;
+  }
+  return 0;
+};
+
+const openChallengeWindow = (roomCode: string, gameState: GameState, pending: PendingChallengeState) => {
+  const cardTemplate = gameState.cardTemplates[pending.pendingCardInstance.templateId];
+  const pendingCardName = cardTemplate?.name ?? pending.pendingCardInstance.templateId;
+  (gameState as any).pendingChallenge = {
+    pendingPlayerId: pending.pendingPlayerId,
+    pendingCardName,
+    pendingCardType: pending.pendingCardType,
+    eligibleChallengerIds: [...pending.eligibleChallengerIds],
+  };
+  pendingChallenges.set(roomCode, pending);
+};
+
+const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState, gameState: GameState) => {
+  const player = gameState.players[pending.pendingPlayerId];
+  if (!player) return;
+
+  if (pending.pendingCardType === 'hero') {
+    player.zones.party.push(pending.pendingCardInstance);
+    applyWinIfMet(gameState, player, pending.pendingPlayerId);
+    if (!heroesPlayedFromAbilityThisTurn.has(roomCode)) {
+      heroesPlayedFromAbilityThisTurn.set(roomCode, new Set());
+    }
+    heroesPlayedFromAbilityThisTurn.get(roomCode)!.add(pending.pendingCardInstance.instanceId);
+    const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
+    if (playerSocket) (playerSocket as any).emit('heroPlayAccepted', pending.pendingCardInstance.instanceId);
+  } else if (pending.pendingCardType === 'item') {
+    const targetPlayer = gameState.players[pending.itemTargetPlayerId ?? pending.pendingPlayerId];
+    if (targetPlayer) {
+      targetPlayer.zones.party.push(pending.pendingCardInstance);
+      const targetHero = targetPlayer.zones.party.find(c => c.instanceId === pending.itemTargetHeroInstanceId);
+      if (targetHero) targetHero.equippedItem = pending.pendingCardInstance.instanceId;
+    }
+  } else if (pending.pendingCardType === 'magic') {
+    gameState.discardPile.push(pending.pendingCardInstance);
+    const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
+    if (playerSocket && pending.magicSteps) {
+      processMagicCardSteps(
+        playerSocket as any,
+        gameState,
+        player,
+        pending.pendingCardInstance.instanceId,
+        pending.magicSteps,
+        undefined
+      );
+    }
+  }
+};
+
+const resolveChallengeRollOff = (
+  roomCode: string,
+  pending: PendingChallengeState,
+  gameState: GameState,
+  sendRoomUpdate: () => void
+) => {
+  if (!pending.challengerId) return;
+  const challenger = gameState.players[pending.challengerId];
+  const challenged = gameState.players[pending.pendingPlayerId];
+  if (!challenger || !challenged) return;
+
+  const challengerRoll = Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1;
+  const challengerBonus = pending.challengerRollBonus + getPartyLeaderChallengeBonus(gameState, pending.challengerId);
+  const challengerTotalRoll = challengerRoll + challengerBonus;
+  const challengedRoll = Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1;
+
+  const challengerWon = challengerTotalRoll > challengedRoll;
+
+  if (pending.challengeCardInstanceId) {
+    moveCardBetweenZones(challenger.zones.hand, gameState.discardPile, pending.challengeCardInstanceId);
+  }
+
+  const cardTemplate = gameState.cardTemplates[pending.pendingCardInstance.templateId];
+  const cardName = cardTemplate?.name ?? pending.pendingCardInstance.templateId;
+
+  if (challengerWon) {
+    gameState.discardPile.push(pending.pendingCardInstance);
+  } else {
+    executePendingCardPlay(roomCode, pending, gameState);
+  }
+
+  delete (gameState as any).pendingChallenge;
+  pendingChallenges.delete(roomCode);
+
+  io.to(roomCode).emit('challengeResolved', {
+    challengerWon,
+    challengerName: challenger.username ?? pending.challengerId,
+    challengedName: challenged.username ?? pending.pendingPlayerId,
+    challengerRoll,
+    challengerBonus,
+    challengerTotalRoll,
+    challengedRoll,
+    cardName,
+  });
+
+  sendRoomUpdate();
+};
+
+const triggerEndTurn = (
+  playerId: string,
+  gameState: GameState,
+  roomCode: string,
+  sendRoomUpdate: () => void
+) => {
+  const currentPlayer = gameState.players[playerId];
+  if (currentPlayer) decrementTemporaryModifiers(currentPlayer);
+  delete (gameState as any).roomFlags;
+  delete (gameState as any).forceEndTurn;
+
+  const playerIds = Object.keys(gameState.players);
+  if (playerIds.length === 0) return;
+
+  const currentIndex = playerIds.findIndex((id) => id === playerId);
+  const nextIndex = (currentIndex + 1) % playerIds.length;
+  const nextPlayerId = playerIds[nextIndex] ?? '';
+
+  gameState.activePlayerId = nextPlayerId;
+  gameState.turnNumber = (gameState.turnNumber ?? 0) + 1;
+
+  const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
+  if (nextPlayer) {
+    nextPlayer.actionPoints = 3;
+    for (const slainMonster of nextPlayer.slainMonsters ?? []) {
+      const mt = gameState.cardTemplates[slainMonster.templateId] as any;
+      if (mt?.slainEffect?.action === 'EXTRA_AP') {
+        nextPlayer.actionPoints += (mt.slainEffect.amount as number) ?? 0;
+      }
+    }
+    nextPlayer.zones.party.forEach((card) => { card.effectUsedThisTurn = false; });
+    nextPlayer.zones.hand.forEach((card) => { card.effectUsedThisTurn = false; });
+  }
+
+  heroesPlayedFromAbilityThisTurn.delete(roomCode);
+  pendingChallenges.delete(roomCode);
+  delete (gameState as any).pendingChallenge;
+  modifierPhases.delete(roomCode);
+  delete (gameState as any).modifierPhase;
+  sendRoomUpdate();
 };
 
 const activateHeroAbility = (
@@ -584,24 +1532,458 @@ const activateHeroAbility = (
     return;
   }
 
+  // Handle costs (SACRIFICE / DISCARD) before processing effects
+  const costs = (template.activeSkill.costs as any[] | undefined) ?? [];
+
+  const discardCost = costs.find((c: any) => c.type === 'DISCARD');
+  if (discardCost) {
+    const cardTypeFilter = discardCost.cardType as string | undefined;
+    const discardOptions = player.zones.hand
+      .filter((card) => !cardTypeFilter || cardTypeFilter === 'any' || card.cardType === cardTypeFilter)
+      .map((card) => ({
+        id: card.instanceId,
+        label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
+        payload: { cardInstanceId: card.instanceId },
+      }));
+    if (discardOptions.length === 0) {
+      sourceSocket.emit('actionFailed', 'No valid cards in hand to discard.');
+      return;
+    }
+    const label = cardTypeFilter && cardTypeFilter !== 'any' ? `a ${cardTypeFilter} card` : 'a card';
+    const promptId = buildPromptId();
+    abilityPromptRequests.set(promptId, {
+      promptId,
+      roomCode: sourceSocket.data.roomCode as string,
+      heroInstanceId,
+      sourcePlayerId: sourceSocket.id,
+      promptType: 'discardCard',
+      message: `Discard ${label} from your hand.`,
+      options: discardOptions,
+      effect: { action: 'PROMPT_DISCARD', target: 'self' },
+      remainingEffects: template.activeSkill.effects,
+    });
+    sourceSocket.emit('abilityPrompt', {
+      promptId,
+      heroInstanceId,
+      promptType: 'discardCard',
+      message: `Discard ${label} from your hand.`,
+      options: discardOptions,
+      requesterId: sourceSocket.id,
+    });
+    return;
+  }
+
+  const sacrificeCost = costs.find((c: any) => c.type === 'SACRIFICE');
+  if (sacrificeCost) {
+    const sacrificeOptions = player.zones.party
+      .filter((card) => card.cardType !== 'party_leader')
+      .map((card) => ({
+        id: card.instanceId,
+        label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
+        payload: { cardInstanceId: card.instanceId },
+      }));
+    if (sacrificeOptions.length === 0) {
+      sourceSocket.emit('actionFailed', 'No cards available to sacrifice.');
+      return;
+    }
+    const promptId = buildPromptId();
+    abilityPromptRequests.set(promptId, {
+      promptId,
+      roomCode: sourceSocket.data.roomCode as string,
+      heroInstanceId,
+      sourcePlayerId: sourceSocket.id,
+      promptType: 'discardCard',
+      message: 'Choose a card to sacrifice.',
+      options: sacrificeOptions,
+      effect: { action: 'SACRIFICE', ...sacrificeCost },
+      remainingEffects: template.activeSkill.effects,
+    });
+    sourceSocket.emit('abilityPrompt', {
+      promptId,
+      heroInstanceId,
+      promptType: 'discardCard',
+      message: 'Choose a card to sacrifice.',
+      options: sacrificeOptions,
+      requesterId: sourceSocket.id,
+    });
+    return;
+  }
+
   const result = processHeroAbilityEffects(sourceSocket, gameState, player, hero, template, template.activeSkill.effects);
-  
+
   // Check if a prompt was just emitted (waiting for user input)
   // If so, don't call emitAbilityResolution yet; let handlePromptResponse handle it
   const pendingPrompts = Array.from(abilityPromptRequests.values()).filter(
     (req) => req.heroInstanceId === heroInstanceId && req.sourcePlayerId === sourceSocket.id
   );
-  
-  if (result && pendingPrompts.length === 0) {
+
+  if (pendingPrompts.length === 0) {
     hero.effectUsedThisTurn = true;
-    emitAbilityResolution(sourceSocket, heroInstanceId, result);
-    sendRoomUpdate();
-  } else if (pendingPrompts.length === 0) {
-    // No result and no pending prompts; mark as used and send update
-    hero.effectUsedThisTurn = true;
-    sendRoomUpdate();
+    if (result) emitAbilityResolution(sourceSocket, heroInstanceId, result);
+    const forcedTurnPlayerId = (gameState as any).forceEndTurn as string | undefined;
+    if (forcedTurnPlayerId) {
+      triggerEndTurn(forcedTurnPlayerId, gameState, sourceSocket.data.roomCode as string, sendRoomUpdate);
+    } else {
+      sendRoomUpdate();
+    }
   }
   // If there are pending prompts, handlePromptResponse will handle marking as used and sending resolution
+};
+
+const processMagicCardSteps = (
+  socket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  player: Player,
+  magicCardId: string,
+  steps: any[],
+  responsePayload?: { playerId?: string; cardInstanceId?: string; [key: string]: unknown }
+): string[] => {
+  const messages: string[] = [];
+  let promptCreated = false;
+
+  // p_007 Cloaked Sage: draw 1 each time you play a magic card
+  if (player.partyLeaderId) {
+    const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+    if (plTemplate?.effect?.triggerEvent === 'ON_DRAW_MAGIC' && plTemplate.effect.action === 'DRAW') {
+      player.zones.hand.push(...drawCards(gameState.mainDeck, 1));
+    }
+  }
+
+  for (let i = 0; i < steps.length; i++) {
+    if (promptCreated) break;
+    const step = steps[i];
+    const remainingSteps = steps.slice(i + 1);
+    let stepResult: string | undefined;
+
+    switch (step.action as string) {
+      case 'DRAW': {
+        const amount = (step.amount as number) ?? 1;
+        const drawn = drawCards(gameState.mainDeck, amount);
+        player.zones.hand.push(...drawn);
+        stepResult = `Drew ${drawn.length} card${drawn.length === 1 ? '' : 's'}.`;
+        break;
+      }
+      case 'APPLY_ROLL_MODIFIER': {
+        const modifiers = (player as any).temporaryModifiers ?? [];
+        modifiers.push({ modifierType: 'rollBonus', amount: (step.amount as number) ?? 0, duration: 1 });
+        (player as any).temporaryModifiers = modifiers;
+        stepResult = `+${step.amount} to all rolls this turn.`;
+        break;
+      }
+      case 'DISCARD': {
+        if (responsePayload?.cardInstanceId) {
+          const card = moveCardBetweenZones(player.zones.hand, gameState.discardPile, responsePayload.cardInstanceId);
+          stepResult = card ? `Discarded ${gameState.cardTemplates[card.templateId]?.name || card.templateId}.` : 'Card not found.';
+          break;
+        }
+        const discardOptions = player.zones.hand.map(c => ({
+          id: c.instanceId,
+          label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+          payload: { cardInstanceId: c.instanceId },
+        }));
+        if (discardOptions.length === 0) { stepResult = 'No cards to discard.'; break; }
+        emitAbilityPrompt(socket.id, {
+          promptId: buildPromptId(),
+          roomCode: socket.data.roomCode as string,
+          heroInstanceId: magicCardId,
+          sourcePlayerId: socket.id,
+          promptType: 'discardCard',
+          message: 'Discard a card.',
+          options: discardOptions,
+          effect: step,
+          remainingEffects: remainingSteps,
+          isMagicCard: true,
+        });
+        promptCreated = true;
+        break;
+      }
+      case 'DESTROY_HERO': {
+        if (responsePayload?.cardInstanceId) {
+          for (const [opId, opponent] of Object.entries(gameState.players)) {
+            if (opId === socket.id) continue;
+            const heroIdx = opponent.zones.party.findIndex(c => c.instanceId === responsePayload.cardInstanceId);
+            if (heroIdx !== -1) {
+              const [hero] = opponent.zones.party.splice(heroIdx, 1);
+              if (hero) {
+                gameState.discardPile.push(hero);
+                if (hero.equippedItem) {
+                  const itemIdx = opponent.zones.party.findIndex(c => c.instanceId === hero.equippedItem);
+                  if (itemIdx !== -1) {
+                    const [item] = opponent.zones.party.splice(itemIdx, 1);
+                    if (item) gameState.discardPile.push(item);
+                  }
+                }
+                stepResult = `Destroyed ${gameState.cardTemplates[hero.templateId]?.name || 'hero'}.`;
+              }
+              break;
+            }
+          }
+          if (!stepResult) stepResult = 'Hero not found.';
+          break;
+        }
+        const destroyOptions: AbilityPromptOption[] = [];
+        for (const [opId, opp] of Object.entries(gameState.players)) {
+          if (opId === socket.id) continue;
+          for (const card of opp.zones.party) {
+            if (card.cardType === 'hero') {
+              destroyOptions.push({
+                id: card.instanceId,
+                label: `${gameState.cardTemplates[card.templateId]?.name || card.templateId} (${opp.username || 'opponent'})`,
+                payload: { cardInstanceId: card.instanceId, playerId: opId },
+              });
+            }
+          }
+        }
+        if (destroyOptions.length === 0) { stepResult = 'No opponent heroes to destroy.'; break; }
+        emitAbilityPrompt(socket.id, {
+          promptId: buildPromptId(),
+          roomCode: socket.data.roomCode as string,
+          heroInstanceId: magicCardId,
+          sourcePlayerId: socket.id,
+          promptType: 'selectCard',
+          message: 'Choose a Hero to DESTROY.',
+          options: destroyOptions,
+          effect: step,
+          remainingEffects: remainingSteps,
+          isMagicCard: true,
+        });
+        promptCreated = true;
+        break;
+      }
+      case 'STEAL': {
+        if (responsePayload?.cardInstanceId && responsePayload?.playerId) {
+          const opponentId = responsePayload.playerId as string;
+          const opponent = gameState.players[opponentId];
+          if (!opponent) { stepResult = 'Opponent not found.'; break; }
+          const card = moveCardBetweenZones(opponent.zones.party, player.zones.party, responsePayload.cardInstanceId);
+          if (!card) { stepResult = 'Could not steal hero.'; break; }
+          if (card.equippedItem) moveCardBetweenZones(opponent.zones.party, player.zones.party, card.equippedItem);
+          stepResult = `Stole ${gameState.cardTemplates[card.templateId]?.name || 'hero'} from ${opponent.username || 'opponent'}.`;
+          break;
+        }
+        const stealOptions: AbilityPromptOption[] = [];
+        for (const [opId, opp] of Object.entries(gameState.players)) {
+          if (opId === socket.id) continue;
+          for (const card of opp.zones.party) {
+            if (card.cardType === 'hero') {
+              stealOptions.push({
+                id: card.instanceId,
+                label: `${gameState.cardTemplates[card.templateId]?.name || card.templateId} (${opp.username || 'opponent'})`,
+                payload: { cardInstanceId: card.instanceId, playerId: opId },
+              });
+            }
+          }
+        }
+        if (stealOptions.length === 0) { stepResult = 'No opponent heroes to steal.'; break; }
+        emitAbilityPrompt(socket.id, {
+          promptId: buildPromptId(),
+          roomCode: socket.data.roomCode as string,
+          heroInstanceId: magicCardId,
+          sourcePlayerId: socket.id,
+          promptType: 'selectCard',
+          message: 'Choose a Hero to STEAL from an opponent.',
+          options: stealOptions,
+          effect: step,
+          remainingEffects: remainingSteps,
+          isMagicCard: true,
+        });
+        promptCreated = true;
+        break;
+      }
+      case 'SWAP': {
+        if (responsePayload?.cardInstanceId && responsePayload?.playerId) {
+          const opponentId = responsePayload.playerId as string;
+          const opponent = gameState.players[opponentId];
+          if (!opponent) { stepResult = 'Opponent not found.'; break; }
+          const card = moveCardBetweenZones(player.zones.party, opponent.zones.party, responsePayload.cardInstanceId);
+          if (!card) { stepResult = 'Could not give hero.'; break; }
+          if (card.equippedItem) moveCardBetweenZones(player.zones.party, opponent.zones.party, card.equippedItem);
+          stepResult = `Gave ${gameState.cardTemplates[card.templateId]?.name || 'hero'} to opponent.`;
+          break;
+        }
+        // Need opponentId from the chained STEAL response — it arrives in responsePayload.playerId
+        const opponentId = responsePayload?.playerId as string | undefined;
+        if (!opponentId) { stepResult = 'No target opponent for SWAP.'; break; }
+        const swapOptions = player.zones.party
+          .filter(c => c.cardType === 'hero')
+          .map(c => ({
+            id: c.instanceId,
+            label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+            // embed opponentId so the next response knows where to send the hero
+            payload: { cardInstanceId: c.instanceId, playerId: opponentId },
+          }));
+        if (swapOptions.length === 0) { stepResult = 'No heroes to give.'; break; }
+        emitAbilityPrompt(socket.id, {
+          promptId: buildPromptId(),
+          roomCode: socket.data.roomCode as string,
+          heroInstanceId: magicCardId,
+          sourcePlayerId: socket.id,
+          promptType: 'selectCard',
+          message: 'Choose a Hero from your Party to give to the opponent.',
+          options: swapOptions,
+          effect: step,
+          remainingEffects: remainingSteps,
+          isMagicCard: true,
+        });
+        promptCreated = true;
+        break;
+      }
+      default:
+        stepResult = `Unsupported magic action: ${step.action as string}`;
+        break;
+    }
+
+    if (stepResult !== undefined) messages.push(stepResult);
+  }
+
+  return messages;
+};
+
+const handleMagicPromptResponse = (
+  sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  sourcePlayer: Player,
+  request: AbilityPromptRequest,
+  responsePayload: { playerId?: string; cardInstanceId?: string; [key: string]: unknown } | undefined,
+  sendRoomUpdate: () => void
+) => {
+  processMagicCardSteps(sourceSocket, gameState, sourcePlayer, request.heroInstanceId, [request.effect], responsePayload);
+
+  if (request.remainingEffects.length > 0) {
+    const chainPayload = responsePayload?.playerId ? { playerId: responsePayload.playerId as string } : undefined;
+    processMagicCardSteps(sourceSocket, gameState, sourcePlayer, request.heroInstanceId, request.remainingEffects, chainPayload);
+  }
+
+  sendRoomUpdate();
+};
+
+const handleItemTriggerResponse = (
+  sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  gameState: GameState,
+  sourcePlayer: Player,
+  sourceHero: CardInstance,
+  request: AbilityPromptRequest,
+  option: AbilityPromptOption,
+  responsePayload: { playerId?: string; cardInstanceId?: string; [key: string]: unknown } | undefined,
+  sendRoomUpdate: () => void
+) => {
+  switch (request.effect.action as string) {
+    case 'ITEM_I004_SELECT_COUNT': {
+      const count = (responsePayload?.count as number | undefined) ?? 0;
+      const bonusPerCard = (request.effect.bonusPerCard as number) ?? 2;
+      if (count === 0 || sourcePlayer.zones.hand.length === 0) {
+        executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, 0, sendRoomUpdate);
+        return;
+      }
+      const discardOptions = sourcePlayer.zones.hand.map(c => ({
+        id: c.instanceId,
+        label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+        payload: { cardInstanceId: c.instanceId },
+      }));
+      emitAbilityPrompt(sourceSocket.id, {
+        promptId: buildPromptId(),
+        roomCode: sourceSocket.data.roomCode as string,
+        heroInstanceId: request.heroInstanceId,
+        sourcePlayerId: request.sourcePlayerId,
+        promptType: 'discardCard',
+        message: `Discard card 1 of ${count}.`,
+        options: discardOptions,
+        effect: { action: 'ITEM_I004_DISCARD', totalDiscards: count, discardsDone: 0, rollBonusSoFar: 0, bonusPerCard },
+        remainingEffects: [],
+        isItemTrigger: true,
+        ...(request.itemInstanceId !== undefined ? { itemInstanceId: request.itemInstanceId } : {}),
+      });
+      sendRoomUpdate();
+      return;
+    }
+    case 'ITEM_I004_DISCARD': {
+      const cardInstanceId = responsePayload?.cardInstanceId;
+      if (cardInstanceId) {
+        const idx = sourcePlayer.zones.hand.findIndex(c => c.instanceId === cardInstanceId);
+        if (idx !== -1) {
+          const [discarded] = sourcePlayer.zones.hand.splice(idx, 1);
+          if (discarded) gameState.discardPile.push(discarded);
+        }
+      }
+      const totalDiscards = request.effect.totalDiscards as number;
+      const discardsDone = (request.effect.discardsDone as number) + 1;
+      const bonusPerCard = (request.effect.bonusPerCard as number) ?? 2;
+      const rollBonusSoFar = (request.effect.rollBonusSoFar as number) + bonusPerCard;
+      if (discardsDone < totalDiscards && sourcePlayer.zones.hand.length > 0) {
+        const discardOptions = sourcePlayer.zones.hand.map(c => ({
+          id: c.instanceId,
+          label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+          payload: { cardInstanceId: c.instanceId },
+        }));
+        emitAbilityPrompt(sourceSocket.id, {
+          promptId: buildPromptId(),
+          roomCode: sourceSocket.data.roomCode as string,
+          heroInstanceId: request.heroInstanceId,
+          sourcePlayerId: request.sourcePlayerId,
+          promptType: 'discardCard',
+          message: `Discard card ${discardsDone + 1} of ${totalDiscards}.`,
+          options: discardOptions,
+          effect: { action: 'ITEM_I004_DISCARD', totalDiscards, discardsDone, rollBonusSoFar, bonusPerCard },
+          remainingEffects: [],
+          isItemTrigger: true,
+          ...(request.itemInstanceId !== undefined ? { itemInstanceId: request.itemInstanceId } : {}),
+        });
+        sendRoomUpdate();
+        return;
+      }
+      executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, rollBonusSoFar, sendRoomUpdate);
+      return;
+    }
+    case 'ITEM_GOBLET_CONFIRM': {
+      if (option.id === 'use' && request.itemInstanceId) {
+        const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === request.itemInstanceId);
+        if (itemIdx !== -1) {
+          const [item] = sourcePlayer.zones.party.splice(itemIdx, 1);
+          if (item) gameState.discardPile.push(item);
+        }
+        delete sourceHero.equippedItem;
+        executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, 0, sendRoomUpdate);
+        return;
+      }
+      sendRoomUpdate();
+      return;
+    }
+    case 'ITEM_SACRIFICE_HERO': {
+      const cardInstanceId = responsePayload?.cardInstanceId;
+      if (cardInstanceId) {
+        const heroIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === cardInstanceId);
+        if (heroIdx !== -1) {
+          const [sacrificed] = sourcePlayer.zones.party.splice(heroIdx, 1);
+          if (sacrificed) {
+            gameState.discardPile.push(sacrificed);
+            if (sacrificed.equippedItem) {
+              const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === sacrificed.equippedItem);
+              if (itemIdx !== -1) {
+                const [item] = sourcePlayer.zones.party.splice(itemIdx, 1);
+                if (item) gameState.discardPile.push(item);
+              }
+            }
+          }
+        }
+      }
+      sendRoomUpdate();
+      return;
+    }
+    case 'ITEM_COIN_DISCARD': {
+      const cardInstanceId = responsePayload?.cardInstanceId;
+      if (cardInstanceId) {
+        const idx = sourcePlayer.zones.hand.findIndex(c => c.instanceId === cardInstanceId);
+        if (idx !== -1) {
+          const [discarded] = sourcePlayer.zones.hand.splice(idx, 1);
+          if (discarded) gameState.discardPile.push(discarded);
+        }
+      }
+      sendRoomUpdate();
+      return;
+    }
+    default:
+      sendRoomUpdate();
+  }
 };
 
 const handlePromptResponse = (
@@ -630,7 +2012,7 @@ const handlePromptResponse = (
 
   abilityPromptRequests.delete(promptId);
 
-  const responsePayload = option.payload as { playerId?: string; cardInstanceId?: string } | undefined;
+  const responsePayload = option.payload as { playerId?: string; cardInstanceId?: string; [key: string]: unknown } | undefined;
   const sourcePlayer = getPlayerBySocketId(gameState, request.sourcePlayerId);
   if (!sourcePlayer) {
     sourceSocket.emit('actionFailed', 'Ability source player not found.');
@@ -638,8 +2020,99 @@ const handlePromptResponse = (
   }
 
   const sourceHero = findHeroInPlayerParty(sourcePlayer, request.heroInstanceId);
+
+  if (request.isMagicCard) {
+    handleMagicPromptResponse(sourceSocket, gameState, sourcePlayer, request, responsePayload, sendRoomUpdate);
+    return;
+  }
+
+  if (request.isMonsterEffect) {
+    const roomCode = sourceSocket.data.roomCode as string;
+    switch (request.effect.action) {
+      case 'MONSTER_DISCARD': {
+        const cardId = responsePayload?.cardInstanceId;
+        if (cardId) {
+          const idx = sourcePlayer.zones.hand.findIndex(c => c.instanceId === cardId);
+          if (idx !== -1) {
+            const [card] = sourcePlayer.zones.hand.splice(idx, 1);
+            if (card) gameState.discardPile.push(card);
+          }
+        }
+        const remaining = (request.effect.remaining as number) - 1;
+        if (remaining > 0 && sourcePlayer.zones.hand.length > 0) {
+          const opts = sourcePlayer.zones.hand.map(c => ({
+            id: c.instanceId,
+            label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+            payload: { cardInstanceId: c.instanceId },
+          }));
+          emitAbilityPrompt(sourceSocket.id, {
+            promptId: buildPromptId(),
+            roomCode,
+            heroInstanceId: request.heroInstanceId,
+            sourcePlayerId: request.sourcePlayerId,
+            promptType: 'discardCard',
+            message: `Discard ${remaining} more card${remaining > 1 ? 's' : ''} (monster penalty).`,
+            options: opts,
+            effect: { ...request.effect, remaining },
+            remainingEffects: [],
+            isMonsterEffect: true,
+          });
+          sendRoomUpdate();
+          return;
+        }
+        sendRoomUpdate();
+        return;
+      }
+      case 'MONSTER_SACRIFICE_HERO': {
+        const cardId = responsePayload?.cardInstanceId;
+        if (cardId) {
+          const heroIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === cardId);
+          if (heroIdx !== -1) {
+            const [sacrificed] = sourcePlayer.zones.party.splice(heroIdx, 1);
+            if (sacrificed) {
+              gameState.discardPile.push(sacrificed);
+              if (sacrificed.equippedItem) {
+                const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === sacrificed.equippedItem);
+                if (itemIdx !== -1) {
+                  const [item] = sourcePlayer.zones.party.splice(itemIdx, 1);
+                  if (item) gameState.discardPile.push(item);
+                }
+              }
+            }
+          }
+        }
+        sendRoomUpdate();
+        return;
+      }
+      default:
+        sendRoomUpdate();
+        return;
+    }
+  }
+
+  if (request.isPartyLeaderAbility) {
+    const targetPlayerId = responsePayload?.playerId;
+    if (targetPlayerId) {
+      const targetPlayer = gameState.players[targetPlayerId];
+      if (targetPlayer && targetPlayer.zones.hand.length > 0) {
+        const randomIdx = Math.floor(Math.random() * targetPlayer.zones.hand.length);
+        const [stolenCard] = targetPlayer.zones.hand.splice(randomIdx, 1);
+        if (stolenCard) sourcePlayer.zones.hand.push(stolenCard);
+      }
+    }
+    const partyLeaderCard = sourcePlayer.zones.party.find(c => c.cardType === 'party_leader');
+    if (partyLeaderCard) partyLeaderCard.effectUsedThisTurn = true;
+    sendRoomUpdate();
+    return;
+  }
+
   if (!sourceHero) {
     sourceSocket.emit('actionFailed', 'Source hero not found when resolving prompt.');
+    return;
+  }
+
+  if (request.isItemTrigger) {
+    handleItemTriggerResponse(sourceSocket, gameState, sourcePlayer, sourceHero, request, option, responsePayload, sendRoomUpdate);
     return;
   }
 
@@ -650,17 +2123,30 @@ const handlePromptResponse = (
   }
 
   const result = processHeroAbilityEffects(sourceSocket, gameState, player, sourceHero, template, [request.effect], responsePayload);
-  
-  // Check if there are more prompts pending for this ability
+
+  let remainingResult: string | undefined;
+  if (request.remainingEffects.length > 0) {
+    // Pass playerId from the response payload so chained effects like STEAL_RANDOM_CARD
+    // target_owner can access who owns the card that was just selected.
+    const remainingPayload = responsePayload?.playerId ? { playerId: responsePayload.playerId } : undefined;
+    remainingResult = processHeroAbilityEffects(sourceSocket, gameState, sourcePlayer, sourceHero, template, request.remainingEffects, remainingPayload) ?? undefined;
+  }
+
+  const combinedResult = [result, remainingResult].filter(Boolean).join(' ') || undefined;
+
   const pendingPrompts = Array.from(abilityPromptRequests.values()).filter(
     (req) => req.heroInstanceId === sourceHero.instanceId && req.sourcePlayerId === request.sourcePlayerId
   );
-  
-  // Only mark as used and emit resolution if no more prompts are pending
+
   if (pendingPrompts.length === 0) {
     sourceHero.effectUsedThisTurn = true;
-    if (result) {
-      emitAbilityResolution(sourceSocket, sourceHero.instanceId, result);
+    if (combinedResult) {
+      emitAbilityResolution(sourceSocket, sourceHero.instanceId, combinedResult);
+    }
+    const forcedTurnPlayerId = (gameState as any).forceEndTurn as string | undefined;
+    if (forcedTurnPlayerId) {
+      triggerEndTurn(forcedTurnPlayerId, gameState, sourceSocket.data.roomCode as string, sendRoomUpdate);
+      return;
     }
   }
 
@@ -704,6 +2190,8 @@ const handlePromptResponse = (
       requesterId: request.sourcePlayerId,
     });
   }
+
+  sendRoomUpdate();
 };
 
 const app = express();
@@ -790,10 +2278,10 @@ io.on('connection', (socket: Socket) => {
       username,
       actionPoints: 3,
       partyLeaderId: undefined,
+      slainMonsters: [],
       zones: {
         hand: [],
         party: [],
-        discardPile: []
       }
     };
   } else if (username) {
@@ -891,6 +2379,32 @@ io.on('connection', (socket: Socket) => {
     sendRoomUpdate();
   });
 
+  socket.on('mulligan', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'in_progress') return;
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+    const player = gameState.players[socket.id];
+    if (!player) return;
+    if ((player.actionPoints ?? 0) < 3) {
+      socket.emit('actionFailed', 'Not enough AP to mulligan (costs 3 AP).');
+      return;
+    }
+    if (gameState.mainDeck.length < 5) {
+      socket.emit('actionFailed', 'Not enough cards in the deck to mulligan.');
+      return;
+    }
+
+    gameState.discardPile.push(...player.zones.hand);
+    player.zones.hand = [];
+    player.zones.hand.push(...drawCards(gameState.mainDeck, 5));
+    player.actionPoints = (player.actionPoints ?? 0) - 3;
+
+    sendRoomUpdate();
+  });
+
   socket.on('playHero', (instanceId) => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState) return;
@@ -932,8 +2446,86 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    player.zones.party.push(playedCard);
     player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    const roomCode = socket.data.roomCode as string;
+    const eligibleChallengerIds = getEligibleChallengerIds(gameState, socket.id);
+
+    if (eligibleChallengerIds.length > 0) {
+      openChallengeWindow(roomCode, gameState, {
+        pendingCardInstance: playedCard,
+        pendingPlayerId: socket.id,
+        pendingCardType: 'hero',
+        eligibleChallengerIds,
+        passedPlayerIds: new Set(),
+        challengerRollBonus: 0,
+      });
+    } else {
+      player.zones.party.push(playedCard);
+      applyWinIfMet(gameState, player, socket.id);
+      if (!heroesPlayedFromAbilityThisTurn.has(roomCode)) {
+        heroesPlayedFromAbilityThisTurn.set(roomCode, new Set());
+      }
+      heroesPlayedFromAbilityThisTurn.get(roomCode)!.add(playedCard.instanceId);
+      socket.emit('heroPlayAccepted', playedCard.instanceId);
+    }
+
+    sendRoomUpdate();
+  });
+
+  socket.on('playMagic', (cardInstanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'in_progress') {
+      socket.emit('actionFailed', 'Cannot play a magic card now.');
+      return;
+    }
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+    const player = gameState.players[socket.id];
+    if (!player) return;
+    if ((player.actionPoints ?? 0) < 1) {
+      socket.emit('actionFailed', 'Not enough AP to play a magic card.');
+      return;
+    }
+    const cardIndex = player.zones.hand.findIndex(c => c.instanceId === cardInstanceId);
+    if (cardIndex === -1) {
+      socket.emit('actionFailed', 'Magic card not found in hand.');
+      return;
+    }
+    const card = player.zones.hand[cardIndex];
+    if (!card || card.cardType !== 'magic') {
+      socket.emit('actionFailed', 'Selected card is not a magic card.');
+      return;
+    }
+    const template = gameState.cardTemplates[card.templateId] as any;
+    if (!template?.effect) {
+      socket.emit('actionFailed', 'This magic card has no effect defined.');
+      return;
+    }
+    player.actionPoints = (player.actionPoints ?? 0) - 1;
+    const [removedMagicCard] = player.zones.hand.splice(cardIndex, 1);
+    if (!removedMagicCard) { sendRoomUpdate(); return; }
+
+    const magicRoomCode = socket.data.roomCode as string;
+    const steps: any[] = (template.effect.steps as any[] | undefined) ?? [template.effect];
+    const magicEligibleIds = getEligibleChallengerIds(gameState, socket.id);
+
+    if (magicEligibleIds.length > 0) {
+      openChallengeWindow(magicRoomCode, gameState, {
+        pendingCardInstance: removedMagicCard,
+        pendingPlayerId: socket.id,
+        pendingCardType: 'magic',
+        magicSteps: steps,
+        eligibleChallengerIds: magicEligibleIds,
+        passedPlayerIds: new Set(),
+        challengerRollBonus: 0,
+      });
+    } else {
+      gameState.discardPile.push(removedMagicCard);
+      processMagicCardSteps(socket, gameState, player, removedMagicCard.instanceId, steps, undefined);
+    }
 
     sendRoomUpdate();
   });
@@ -989,14 +2581,34 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const [removedItems] = player.zones.hand.splice(itemIndex, 1);
-    if (!removedItems) {
+    const [removedItem] = player.zones.hand.splice(itemIndex, 1);
+    if (!removedItem) {
       socket.emit('actionFailed', 'Failed to remove item from hand.');
       return;
     }
 
-    targetHero.equippedItem = removedItems.instanceId;
     player.actionPoints = (player.actionPoints ?? 0) - 1;
+
+    const itemRoomCode = socket.data.roomCode as string;
+    const itemEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
+      ? []
+      : getEligibleChallengerIds(gameState, socket.id);
+
+    if (itemEligibleIds.length > 0) {
+      openChallengeWindow(itemRoomCode, gameState, {
+        pendingCardInstance: removedItem,
+        pendingPlayerId: socket.id,
+        pendingCardType: 'item',
+        itemTargetPlayerId: socket.id,
+        itemTargetHeroInstanceId: targetHeroInstanceId,
+        eligibleChallengerIds: itemEligibleIds,
+        passedPlayerIds: new Set(),
+        challengerRollBonus: 0,
+      });
+    } else {
+      player.zones.party.push(removedItem);
+      targetHero.equippedItem = removedItem.instanceId;
+    }
 
     sendRoomUpdate();
   });
@@ -1063,16 +2675,324 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const [removedItems] = player.zones.hand.splice(itemIndex, 1);
-    if (!removedItems) {
+    const [removedCursedItem] = player.zones.hand.splice(itemIndex, 1);
+    if (!removedCursedItem) {
       socket.emit('actionFailed', 'Failed to remove cursed item from hand.');
       return;
     }
 
-    targetHero.equippedItem = removedItems.instanceId;
     player.actionPoints = (player.actionPoints ?? 0) - 1;
 
+    const cursedRoomCode = socket.data.roomCode as string;
+    const cursedEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
+      ? []
+      : getEligibleChallengerIds(gameState, socket.id);
+
+    if (cursedEligibleIds.length > 0) {
+      openChallengeWindow(cursedRoomCode, gameState, {
+        pendingCardInstance: removedCursedItem,
+        pendingPlayerId: socket.id,
+        pendingCardType: 'item',
+        itemTargetPlayerId: targetPlayerId,
+        itemTargetHeroInstanceId: targetHeroInstanceId,
+        eligibleChallengerIds: cursedEligibleIds,
+        passedPlayerIds: new Set(),
+        challengerRollBonus: 0,
+      });
+    } else {
+      targetPlayer.zones.party.push(removedCursedItem);
+      targetHero.equippedItem = removedCursedItem.instanceId;
+    }
+
     sendRoomUpdate();
+  });
+
+  socket.on('playChallenge', (challengeCardInstanceId) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    const roomCode = socket.data.roomCode as string;
+    if (!gameState) return;
+
+    const pending = pendingChallenges.get(roomCode);
+    if (!pending) {
+      socket.emit('actionFailed', 'No active challenge window.');
+      return;
+    }
+    if (pending.challengerId) {
+      socket.emit('actionFailed', 'This card play has already been challenged.');
+      return;
+    }
+    if (!pending.eligibleChallengerIds.includes(socket.id) || pending.passedPlayerIds.has(socket.id)) {
+      socket.emit('actionFailed', 'You are not eligible to challenge.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    const challengeCard = player.zones.hand.find(
+      c => c.instanceId === challengeCardInstanceId && c.cardType === 'challenge'
+    );
+    if (!challengeCard) {
+      socket.emit('actionFailed', 'Challenge card not found in hand.');
+      return;
+    }
+
+    const template = gameState.cardTemplates[challengeCard.templateId] as any;
+    const req = template?.onEvent?.requirement;
+    if (req?.cardType === 'hero' && req.class && req.eligibility === 'self') {
+      const hasClass = player.zones.party.some(
+        partyCard => getHeroEffectiveClass(gameState, player, partyCard) === req.class
+      );
+      if (!hasClass) {
+        socket.emit('actionFailed', `You need a ${req.class} hero in your party to play this challenge card.`);
+        return;
+      }
+    }
+
+    pending.challengerId = socket.id;
+    pending.challengeCardInstanceId = challengeCardInstanceId;
+    pending.challengerRollBonus = getChallengeCardBonus(template);
+
+    const gsPending = (gameState as any).pendingChallenge;
+    if (gsPending) gsPending.challengerId = socket.id;
+
+    resolveChallengeRollOff(roomCode, pending, gameState, sendRoomUpdate);
+  });
+
+  socket.on('passChallenge', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    const roomCode = socket.data.roomCode as string;
+    if (!gameState) return;
+
+    const pending = pendingChallenges.get(roomCode);
+    if (!pending || pending.challengerId) return;
+    if (!pending.eligibleChallengerIds.includes(socket.id) || pending.passedPlayerIds.has(socket.id)) return;
+
+    pending.passedPlayerIds.add(socket.id);
+    const remaining = pending.eligibleChallengerIds.filter(id => !pending.passedPlayerIds.has(id));
+
+    if (remaining.length === 0) {
+      executePendingCardPlay(roomCode, pending, gameState);
+      pendingChallenges.delete(roomCode);
+      delete (gameState as any).pendingChallenge;
+    } else {
+      const gsPending = (gameState as any).pendingChallenge;
+      if (gsPending) gsPending.eligibleChallengerIds = remaining;
+    }
+
+    sendRoomUpdate();
+  });
+
+  socket.on('playModifier', (modifierInstanceId, choiceIndex) => {
+    const roomCode = socket.data.roomCode as string;
+    const gameState = getRoomState(roomCode);
+    if (!gameState) return;
+
+    if (pendingChallenges.has(roomCode)) {
+      socket.emit('actionFailed', 'Cannot play a modifier during a challenge window.');
+      return;
+    }
+
+    const phase = modifierPhases.get(roomCode);
+    if (!phase) {
+      socket.emit('actionFailed', 'No active modifier phase.');
+      return;
+    }
+
+    const isRollerTurn = phase.phase === 'roller_turn' && socket.id === phase.rollingPlayerId;
+    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === socket.id;
+    if (!isRollerTurn && !isOpponentTurn) {
+      socket.emit('actionFailed', 'It is not your turn to play a modifier.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    const cardIndex = player.zones.hand.findIndex(c => c.instanceId === modifierInstanceId && c.cardType === 'modifier');
+    if (cardIndex === -1) {
+      socket.emit('actionFailed', 'Modifier card not found in hand.');
+      return;
+    }
+
+    const [card] = player.zones.hand.splice(cardIndex, 1);
+    if (!card) return;
+    gameState.discardPile.push(card);
+
+    const template = gameState.cardTemplates[card.templateId] as any;
+    const amount = getModifierAmount(template, choiceIndex, phase.rollContext);
+    const choiceLabel = getModifierChoiceLabel(template, choiceIndex, phase.rollContext);
+    phase.accumulatedModifier += amount;
+    // p_004 Protecting Horn: +1 (or -1 matching direction) when THIS player plays a modifier
+    if (amount !== 0 && player.partyLeaderId) {
+      const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+      if (plTemplate?.effect?.triggerEvent === 'ON_MODIFIER_PLAYED') {
+        phase.accumulatedModifier += amount > 0 ? 1 : -1;
+      }
+    }
+    phase.modifiersPlayed.push({
+      playerName: player.username ?? socket.id,
+      cardName: template?.name ?? card.templateId,
+      amount,
+      choiceLabel,
+    });
+
+    if (phase.phase === 'opponent_turn') phase.cardPlayedThisCycle = true;
+
+    if (phase.phase === 'roller_turn') {
+      const newTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
+      if (newTotal >= phase.requiredRoll) {
+        phase.phase = 'opponent_turn';
+        phase.opponentQueue = phase.allOpponentsWithModifiers.filter(
+          pid => gameState.players[pid]?.zones.hand.some(c => c.cardType === 'modifier')
+        );
+        phase.cardPlayedThisCycle = false;
+        if (phase.opponentQueue.length === 0) {
+          finalizeRoll(roomCode, phase, gameState, sendRoomUpdate);
+          return;
+        }
+      }
+    }
+
+    updateModifierPhaseGameState(roomCode, phase, gameState);
+    sendRoomUpdate();
+  });
+
+  socket.on('passModifier', () => {
+    const roomCode = socket.data.roomCode as string;
+    const gameState = getRoomState(roomCode);
+    if (!gameState) return;
+
+    const phase = modifierPhases.get(roomCode);
+    if (!phase) {
+      socket.emit('actionFailed', 'No active modifier phase.');
+      return;
+    }
+
+    const isRollerTurn = phase.phase === 'roller_turn' && socket.id === phase.rollingPlayerId;
+    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === socket.id;
+    if (!isRollerTurn && !isOpponentTurn) {
+      socket.emit('actionFailed', 'It is not your turn to pass.');
+      return;
+    }
+
+    if (phase.phase === 'roller_turn') {
+      phase.phase = 'opponent_turn';
+      phase.opponentQueue = phase.allOpponentsWithModifiers.filter(
+        pid => gameState.players[pid]?.zones.hand.some(c => c.cardType === 'modifier')
+      );
+      phase.cardPlayedThisCycle = false;
+      if (phase.opponentQueue.length === 0) {
+        finalizeRoll(roomCode, phase, gameState, sendRoomUpdate);
+        return;
+      }
+      updateModifierPhaseGameState(roomCode, phase, gameState);
+      sendRoomUpdate();
+      return;
+    }
+
+    advanceModifierQueue(roomCode, phase, gameState, sendRoomUpdate);
+  });
+
+  socket.on('usePartyLeaderAbility', () => {
+    const roomCode = socket.data.roomCode as string;
+    const gameState = getRoomState(roomCode);
+    if (!gameState || gameState.status !== 'in_progress') return;
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+    if (pendingChallenges.has(roomCode) || modifierPhases.has(roomCode)) {
+      socket.emit('actionFailed', 'Cannot use party leader ability during an active roll or challenge.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    const partyLeaderCard = player.zones.party.find(c => c.cardType === 'party_leader');
+    if (!partyLeaderCard) {
+      socket.emit('actionFailed', 'No party leader in play.');
+      return;
+    }
+    if (partyLeaderCard.effectUsedThisTurn) {
+      socket.emit('actionFailed', 'Party leader ability already used this turn.');
+      return;
+    }
+
+    const template = gameState.cardTemplates[partyLeaderCard.templateId] as any;
+    if (!template?.effect?.isOptional) {
+      socket.emit('actionFailed', 'This party leader ability triggers automatically.');
+      return;
+    }
+
+    if (template.effect.action === 'STEAL_CARD') {
+      const opponents = Object.entries(gameState.players).filter(
+        ([id, p]) => id !== socket.id && p.zones.hand.length > 0
+      );
+      if (opponents.length === 0) {
+        socket.emit('actionFailed', 'No opponents have cards to steal.');
+        return;
+      }
+      const options: AbilityPromptOption[] = opponents.map(([id, p]) => ({
+        id: `player_${id}`,
+        label: `${p.username ?? id} (${p.zones.hand.length} card${p.zones.hand.length !== 1 ? 's' : ''})`,
+        payload: { playerId: id },
+      }));
+      emitAbilityPrompt(socket.id, {
+        promptId: buildPromptId(),
+        roomCode,
+        heroInstanceId: partyLeaderCard.instanceId,
+        sourcePlayerId: socket.id,
+        promptType: 'selectPlayer',
+        message: 'Choose an opponent to steal a card from.',
+        options,
+        effect: { action: 'STEAL_CARD' },
+        remainingEffects: [],
+        isPartyLeaderAbility: true,
+      });
+    }
+    sendRoomUpdate();
+  });
+
+  socket.on('attackMonster', (monsterInstanceId) => {
+    const roomCode = socket.data.roomCode as string;
+    const gameState = getRoomState(roomCode);
+    if (!gameState || gameState.status !== 'in_progress') return;
+
+    if (socket.id !== gameState.activePlayerId) {
+      socket.emit('actionFailed', 'Not your turn.');
+      return;
+    }
+
+    if (pendingChallenges.has(roomCode) || modifierPhases.has(roomCode)) {
+      socket.emit('actionFailed', 'Cannot attack while another action is pending.');
+      return;
+    }
+
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    if ((player.actionPoints ?? 0) < 2) {
+      socket.emit('actionFailed', 'Not enough AP to attack a monster (costs 2 AP).');
+      return;
+    }
+
+    const monster = gameState.activeMonsters.find(m => m.instanceId === monsterInstanceId);
+    if (!monster) {
+      socket.emit('actionFailed', 'Monster not found.');
+      return;
+    }
+
+    const monsterTemplate = gameState.cardTemplates[monster.templateId] as any;
+    const reqCheck = checkMonsterRequirements(gameState, player, monsterTemplate);
+    if (!reqCheck.met) {
+      socket.emit('actionFailed', `Requirements not met: ${reqCheck.missing}`);
+      return;
+    }
+
+    player.actionPoints = (player.actionPoints ?? 0) - 2;
+    executeMonsterAttackRoll(roomCode, socket, gameState, player, monster, monsterTemplate, sendRoomUpdate);
   });
 
   socket.on('rollHeroAbility', (heroInstanceId) => {
@@ -1103,25 +3023,75 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const template = gameState.cardTemplates[hero.templateId];
-    const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
-    const die1 = Math.floor(Math.random() * 6) + 1;
-    const die2 = Math.floor(Math.random() * 6) + 1;
-      const rollBonus = getPlayerRollBonus(player);
-      const total = die1 + die2;
-      const totalWithBonus = total + rollBonus;
-      const success = totalWithBonus >= requiredRoll;
-      const message = `Rolled ${die1} + ${die2}${rollBonus ? ` + ${rollBonus}` : ''} = ${total + rollBonus}. ${success ? 'Success!' : 'Failed.'} (needed ${requiredRoll}).`;
+    if (hero.effectUsedThisTurn) {
+      socket.emit('actionFailed', 'This hero ability has already been used this turn.');
+      return;
+    }
 
-    socket.emit('heroRollResult', {
-      heroInstanceId,
-      die1,
-      die2,
-        total: totalWithBonus,
-      requiredRoll,
-      success,
-      message,
-    });
+    const playedFromAbility = heroesPlayedFromAbilityThisTurn.get(socket.data.roomCode as string)?.has(heroInstanceId) ?? false;
+    if (!playedFromAbility) {
+      if ((player.actionPoints ?? 0) < 1) {
+        socket.emit('actionFailed', 'Not enough AP to use a hero ability.');
+        return;
+      }
+      player.actionPoints = (player.actionPoints ?? 0) - 1;
+    }
+
+    let preRollBonus = 0;
+    const equippedItemId = hero.equippedItem;
+    if (equippedItemId) {
+      const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
+      if (itemInstance) {
+        const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
+
+        const passives = itemTemplate?.passiveModifiers as Array<{stat: string; value?: any}> | undefined;
+        if (passives?.some(p => p.stat === 'heroEffectLocked')) {
+          if (!playedFromAbility) player.actionPoints = (player.actionPoints ?? 0) + 1;
+          socket.emit('actionFailed', 'This hero\'s effect is locked by an equipped item.');
+          sendRoomUpdate();
+          return;
+        }
+
+        const itemTrigger = itemTemplate?.trigger as { event: string; scope: string; optional?: boolean; effects: any[]; cost?: any[] } | undefined;
+        if (itemTrigger?.event === 'ON_HERO_ROLL_ATTEMPT' && itemTrigger.scope === 'equipped_hero') {
+          const modifyEffect = (itemTrigger.effects ?? []).find((e: any) => e.action === 'MODIFY_ROLL') as { action: string; amount: number } | undefined;
+          if (modifyEffect) {
+            if (!itemTrigger.optional) {
+              preRollBonus += modifyEffect.amount;
+            } else {
+              const maxDiscard = (itemTrigger.cost?.[0] as any)?.max ?? 3;
+              const availableCount = Math.min(maxDiscard, player.zones.hand.length);
+              const countOptions: AbilityPromptOption[] = [];
+              for (let n = 0; n <= availableCount; n++) {
+                const bonus = n * modifyEffect.amount;
+                countOptions.push({
+                  id: String(n),
+                  label: n === 0 ? 'Skip (no bonus)' : `Discard ${n} card${n > 1 ? 's' : ''} (+${bonus} bonus)`,
+                  payload: { count: n },
+                });
+              }
+              emitAbilityPrompt(socket.id, {
+                promptId: buildPromptId(),
+                roomCode: socket.data.roomCode as string,
+                heroInstanceId: hero.instanceId,
+                sourcePlayerId: socket.id,
+                promptType: 'confirm',
+                message: `${itemTemplate.name}: Discard cards for a roll bonus?`,
+                options: countOptions,
+                effect: { action: 'ITEM_I004_SELECT_COUNT', bonusPerCard: modifyEffect.amount },
+                remainingEffects: [],
+                isItemTrigger: true,
+                itemInstanceId: itemInstance.instanceId,
+              });
+              sendRoomUpdate();
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    executeRollAndEmit(socket, gameState, player, hero, preRollBonus, sendRoomUpdate);
   });
 
   socket.on('activateHeroAbility', (heroInstanceId) => {
@@ -1133,13 +3103,6 @@ io.on('connection', (socket: Socket) => {
     }
     const player = gameState.players[socket.id];
     if (!player) return;
-
-    // Deduct 1 AP for using ability from party
-    if ((player.actionPoints ?? 0) < 1) {
-      socket.emit('actionFailed', 'Not enough AP to activate a hero ability.');
-      return;
-    }
-    player.actionPoints = (player.actionPoints ?? 0) - 1;
 
     activateHeroAbility(socket, gameState, heroInstanceId, sendRoomUpdate);
   });
@@ -1238,6 +3201,14 @@ io.on('connection', (socket: Socket) => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'in_progress') return;
     if (socket.id !== gameState.activePlayerId) return;
+    if (pendingChallenges.has(socket.data.roomCode as string)) {
+      socket.emit('actionFailed', 'Cannot end turn while a challenge is pending.');
+      return;
+    }
+    if (modifierPhases.has(socket.data.roomCode as string)) {
+      socket.emit('actionFailed', 'Cannot end turn during a modifier phase.');
+      return;
+    }
 
       const currentPlayer = gameState.players[socket.id];
       if (currentPlayer) {
@@ -1257,6 +3228,10 @@ io.on('connection', (socket: Socket) => {
     const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
     if (nextPlayer) {
       nextPlayer.actionPoints = 3;
+      for (const slainMonster of nextPlayer.slainMonsters ?? []) {
+        const mt = gameState.cardTemplates[slainMonster.templateId] as any;
+        if (mt?.slainEffect?.action === 'EXTRA_AP') nextPlayer.actionPoints += (mt.slainEffect.amount as number) ?? 0;
+      }
       // Reset ability usage flags for new active player
       nextPlayer.zones.party.forEach((card) => {
         card.effectUsedThisTurn = false;
@@ -1265,6 +3240,9 @@ io.on('connection', (socket: Socket) => {
         card.effectUsedThisTurn = false;
       });
     }
+
+    heroesPlayedFromAbilityThisTurn.delete(socket.data.roomCode as string);
+    delete (gameState as any).roomFlags;
 
     sendRoomUpdate();
   });
@@ -1297,6 +3275,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     player.zones.party = [chosenCard];
+    player.partyLeaderId = chosenCard.templateId;
 
     const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
       (id) => id === socket.id
@@ -1332,6 +3311,10 @@ io.on('connection', (socket: Socket) => {
     gameState.discardedMonsters = [];
     gameState.discardPile = [];
     gameState.diceRolls = {};
+    pendingChallenges.delete(socket.data.roomCode as string);
+    delete (gameState as any).pendingChallenge;
+    modifierPhases.delete(socket.data.roomCode as string);
+    delete (gameState as any).modifierPhase;
     gameState.currentRollerId = undefined;
     gameState.firstPlayerId = undefined;
     gameState.rollWinnerId = undefined;
@@ -1344,9 +3327,9 @@ io.on('connection', (socket: Socket) => {
       if (!player) continue;
       player.zones.hand = [];
       player.zones.party = [];
-      player.zones.discardPile = [];
       player.actionPoints = 3;
       player.partyLeaderId = undefined;
+      player.slainMonsters = [];
     }
 
     sendRoomUpdate();
@@ -1368,10 +3351,10 @@ io.on('connection', (socket: Socket) => {
           username: username,
           actionPoints: 3,
           partyLeaderId: undefined,
+          slainMonsters: [],
           zones: {
             hand: [],
             party: [],
-            discardPile: []
           }
         };
       }
@@ -1387,6 +3370,56 @@ io.on('connection', (socket: Socket) => {
     if (!gameState) return;
 
     const wasLobbyLeader = socket.id === gameState.lobbyLeaderId;
+
+    const disconnectPending = pendingChallenges.get(roomCode);
+    if (disconnectPending) {
+      if (disconnectPending.pendingPlayerId === socket.id) {
+        gameState.discardPile.push(disconnectPending.pendingCardInstance);
+        pendingChallenges.delete(roomCode);
+        delete (gameState as any).pendingChallenge;
+      } else if (disconnectPending.eligibleChallengerIds.includes(socket.id)) {
+        disconnectPending.passedPlayerIds.add(socket.id);
+        const remaining = disconnectPending.eligibleChallengerIds.filter(id => !disconnectPending.passedPlayerIds.has(id));
+        if (remaining.length === 0 && !disconnectPending.challengerId) {
+          executePendingCardPlay(roomCode, disconnectPending, gameState);
+          pendingChallenges.delete(roomCode);
+          delete (gameState as any).pendingChallenge;
+        } else {
+          const gsPending = (gameState as any).pendingChallenge;
+          if (gsPending) gsPending.eligibleChallengerIds = remaining;
+        }
+      }
+    }
+
+    const modPhase = modifierPhases.get(roomCode);
+    if (modPhase) {
+      if (modPhase.rollingPlayerId === socket.id) {
+        modifierPhases.delete(roomCode);
+        delete (gameState as any).modifierPhase;
+      } else if (modPhase.allOpponentsWithModifiers.includes(socket.id)) {
+        modPhase.allOpponentsWithModifiers = modPhase.allOpponentsWithModifiers.filter(id => id !== socket.id);
+        modPhase.opponentQueue = modPhase.opponentQueue.filter(id => id !== socket.id);
+        if (modPhase.phase === 'opponent_turn' && modPhase.opponentQueue.length === 0) {
+          if (modPhase.cardPlayedThisCycle) {
+            const newQueue = modPhase.allOpponentsWithModifiers.filter(
+              pid => gameState.players[pid]?.zones.hand.some(c => c.cardType === 'modifier')
+            );
+            if (newQueue.length === 0) {
+              finalizeRoll(roomCode, modPhase, gameState, sendRoomUpdate);
+            } else {
+              modPhase.opponentQueue = newQueue;
+              modPhase.cardPlayedThisCycle = false;
+              updateModifierPhaseGameState(roomCode, modPhase, gameState);
+            }
+          } else {
+            finalizeRoll(roomCode, modPhase, gameState, sendRoomUpdate);
+          }
+        } else {
+          updateModifierPhaseGameState(roomCode, modPhase, gameState);
+        }
+      }
+    }
+
     delete gameState.players[socket.id];
 
     if (gameState.activePlayerId === socket.id) {

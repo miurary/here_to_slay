@@ -14,7 +14,7 @@ export const findCardInstanceById = (gameState?: GameState, instanceId?: string 
     if (!instanceId || !gameState) return undefined;
     // search players' zones
     for (const p of Object.values(gameState.players)) {
-        for (const zone of ['hand', 'party', 'discardPile'] as const) {
+        for (const zone of ['hand', 'party'] as const) {
         const found = p.zones[zone].find((c) => c.instanceId === instanceId);
         if (found) return found;
         }

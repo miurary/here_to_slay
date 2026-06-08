@@ -9,9 +9,10 @@ interface MainDeckCardProps {
     setActionMessage: (message: string | null) => void;
     setShowDrawPrompt: (val: boolean) => void;
     handleDrawFromMain: () => void;
+    handleMulligan: () => void;
 }
 
-export default function MainDeckCard({ gameState, myId, showDrawPrompt, actionMessage, justDrew, setActionMessage, setShowDrawPrompt, handleDrawFromMain }: MainDeckCardProps) {
+export default function MainDeckCard({ gameState, myId, showDrawPrompt, actionMessage, justDrew, setActionMessage, setShowDrawPrompt, handleDrawFromMain, handleMulligan }: MainDeckCardProps) {
     return (
         <div style={{ marginBottom: '1rem' }}>
             <h3>Main Deck</h3>
@@ -48,8 +49,24 @@ export default function MainDeckCard({ gameState, myId, showDrawPrompt, actionMe
                 >
                     Draw 1 card (-1 AP)
                 </button>
-                {(gameState.players[myId]?.actionPoints ?? 0) < 1 && (
-                    <div style={{ color: '#c00' }}>Not enough AP</div>
+                <button
+                    onClick={() => {
+                    const myAP = gameState.players[myId]?.actionPoints ?? 0;
+                    if (myAP >= 3) {
+                        handleMulligan();
+                    }
+                    setShowDrawPrompt(false);
+                    }}
+                    disabled={(gameState.players[myId]?.actionPoints ?? 0) < 3 || gameState.mainDeck.length < 5}
+                    style={{ padding: '0.5rem 1rem', fontSize: '1rem', backgroundColor: (gameState.players[myId]?.actionPoints ?? 0) >= 3 && gameState.mainDeck.length >= 5 ? '#6c757d' : undefined }}
+                >
+                    Mulligan (-3 AP)
+                </button>
+                {(gameState.players[myId]?.actionPoints ?? 0) < 3 && (
+                    <div style={{ color: '#c00', fontSize: '0.85rem' }}>Need 3 AP to mulligan</div>
+                )}
+                {gameState.mainDeck.length < 5 && (gameState.players[myId]?.actionPoints ?? 0) >= 3 && (
+                    <div style={{ color: '#c00', fontSize: '0.85rem' }}>Not enough cards in deck</div>
                 )}
                 </div>
             )}

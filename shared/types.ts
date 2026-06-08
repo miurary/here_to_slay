@@ -27,6 +27,52 @@ export interface AbilityPrompt {
   requesterId: string;
 }
 
+export interface PendingChallengeInfo {
+  pendingPlayerId: string;
+  pendingCardName: string;
+  pendingCardType: 'hero' | 'item' | 'magic';
+  eligibleChallengerIds: string[];
+  challengerId?: string;
+}
+
+export interface ChallengeResolvedData {
+  challengerWon: boolean;
+  challengerName: string;
+  challengedName: string;
+  challengerRoll: number;
+  challengerBonus: number;
+  challengerTotalRoll: number;
+  challengedRoll: number;
+  cardName: string;
+}
+
+export interface ModifierPhaseInfo {
+  heroInstanceId: string;
+  rollingPlayerId: string;
+  requiredRoll: number;
+  currentTotal: number;
+  die1: number;
+  die2: number;
+  persistentBonus: number;
+  accumulatedModifier: number;
+  phase: 'roller_turn' | 'opponent_turn';
+  activePlayerId: string;
+  rollContext: 'HERO_ABILITY' | 'ATTACK_MONSTER';
+  rollType: 'hero_ability' | 'monster_attack';
+  monsterName?: string;
+  lowerBound?: number;
+  modifiersPlayed: Array<{ playerName: string; cardName: string; amount: number; choiceLabel: string }>;
+}
+
+export interface MonsterAttackResultData {
+  attackerName: string;
+  monsterName: string;
+  roll: number;
+  requiredRoll: number;
+  slew: boolean;
+  effectText: string;
+}
+
 export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
@@ -40,6 +86,14 @@ export interface ClientToServerEvents {
   playHero: (instanceId: string) => void;
   playItem: (itemInstanceId: string, targetHeroInstanceId: string) => void;
   playCursedItem: (itemInstanceId: string, targetPlayerId: string, targetHeroInstanceId: string) => void;
+  playMagic: (cardInstanceId: string) => void;
+  playChallenge: (challengeCardInstanceId: string) => void;
+  passChallenge: () => void;
+  playModifier: (modifierInstanceId: string, choiceIndex: number) => void;
+  passModifier: () => void;
+  attackMonster: (monsterInstanceId: string) => void;
+  usePartyLeaderAbility: () => void;
+  mulligan: () => void;
   drawFromMain: () => void;
   endTurn: () => void;
   quitGame: () => void;
@@ -55,6 +109,9 @@ export interface ServerToClientEvents {
   abilityPrompt: (prompt: AbilityPrompt) => void;
   abilityResolution: (data: { message: string; heroInstanceId: string }) => void;
   heroPlayedFromAbility: (heroInstanceId: string) => void;
+  heroPlayAccepted: (heroInstanceId: string) => void;
+  challengeResolved: (data: ChallengeResolvedData) => void;
+  monsterAttackResult: (data: MonsterAttackResultData) => void;
 }
 
 // need to fix clanker code
@@ -96,6 +153,8 @@ export interface GameState {
   currentRollerId: string | undefined;
   firstPlayerId: string | undefined;
   targetMonstersToWin: number | undefined;
+  pendingChallenge?: PendingChallengeInfo;
+  modifierPhase?: ModifierPhaseInfo;
 }
 // need to fix clanker code
 export type Player = PlayerState;
@@ -105,10 +164,10 @@ export interface PlayerState {
   username: string | undefined;
   actionPoints: number;
   partyLeaderId: string | undefined;
+  slainMonsters: CardInstance[];
   zones: {
     hand: CardInstance[];
     party: CardInstance[];
-    discardPile: CardInstance[];
   };
 }
 
