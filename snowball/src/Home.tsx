@@ -51,7 +51,7 @@ export default function Home() {
       }
 
       navigate(`/game/${data.roomCode}`);
-    } catch (error) {
+    } catch {
       setStatus('Unable to connect to the game server.');
     }
   };

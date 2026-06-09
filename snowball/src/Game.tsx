@@ -59,7 +59,7 @@ export default function Game() {
   const [challengeResult, setChallengeResult] = useState<ChallengeResolvedData | null>(null);
   const [monsterAttackResult, setMonsterAttackResult] = useState<MonsterAttackResultData | null>(null);
   const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Connecting...');
+  const [status, setStatus] = useState<string>(!roomCode ? 'Missing room code.' : 'Connecting...');
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
 
@@ -73,10 +73,7 @@ export default function Game() {
   }, [pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling, playHeroPromptOpen]);
 
   useEffect(() => {
-    if (!roomCode) {
-      setStatus('Missing room code.');
-      return;
-    }
+    if (!roomCode) return;
 
     const client = io(`${import.meta.env.VITE_API_URL}`, {
       auth: {
@@ -85,6 +82,7 @@ export default function Game() {
       },
     });
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSocket(client);
 
     client.on('connect', () => {
@@ -440,29 +438,29 @@ export default function Game() {
 
   const getChallengeCardBonus = (card: CardInstance): number => {
     if (!gameState) return 0;
-    const template = gameState.cardTemplates[card.templateId] as any;
-    const effects = template?.onEvent?.effects as any[] | undefined;
+    const template = gameState.cardTemplates[card.templateId];
+    const effects = template?.onEvent?.effects;
     if (!effects) return 0;
-    const modifyRoll = effects.find((e: any) => e.action === 'MODIFY_ROLL');
-    return (modifyRoll?.amount as number) ?? 0;
+    const modifyRoll = effects.find(e => e.action === 'MODIFY_ROLL');
+    return modifyRoll?.amount ?? 0;
   };
 
   const getEligibleChallengeCards = (): CardInstance[] => {
     if (!gameState || !myPlayer) return [];
     return myPlayer.zones.hand.filter(card => {
       if (card.cardType !== 'challenge') return false;
-      const template = gameState.cardTemplates[card.templateId] as any;
+      const template = gameState.cardTemplates[card.templateId];
       const req = template?.onEvent?.requirement;
       if (!req) return true;
       if (req.cardType === 'hero' && req.class && req.eligibility === 'self') {
         return myPlayer.zones.party.some(pc => {
-          const pcTemplate = gameState.cardTemplates[pc.templateId] as any;
-          const baseClass = pcTemplate?.class as string | undefined;
+          const pcTemplate = gameState.cardTemplates[pc.templateId];
+          const baseClass = pcTemplate?.class;
           if (!pc.equippedItem) return baseClass === req.class;
           const itemInst = myPlayer.zones.party.find(c => c.instanceId === pc.equippedItem);
           if (!itemInst) return baseClass === req.class;
-          const itemTemplate = gameState.cardTemplates[itemInst.templateId] as any;
-          const passives = itemTemplate?.passiveModifiers as Array<{ stat: string; override?: string }> | undefined;
+          const itemTemplate = gameState.cardTemplates[itemInst.templateId];
+          const passives = itemTemplate?.passiveModifiers;
           const classOverride = passives?.find(p => p.stat === 'class' && p.override)?.override;
           return (classOverride ?? baseClass) === req.class;
         });
@@ -535,7 +533,7 @@ export default function Game() {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minHeight: 'calc(100vh - 260px)' }}>
           <main className="mainContent">
             {gameState?.status === 'finished' && (() => {
-              const winnerId = (gameState as any).winnerId as string | undefined;
+              const winnerId = gameState.winnerId;
               const winner = winnerId ? gameState.players[winnerId] : undefined;
               return (
                 <div style={{ padding: '2rem', borderRadius: '12px', backgroundColor: '#d4edda', border: '2px solid #28a745', marginBottom: '1.5rem', textAlign: 'center' }}>
@@ -885,17 +883,17 @@ export default function Game() {
                           <p style={{ color: '#888', fontSize: '0.85rem' }}>No modifier cards in hand.</p>
                         )}
                         {myModifiers.map(card => {
-                          const tmpl = gameState.cardTemplates[card.templateId] as any;
-                          const choices = tmpl?.choices as any[] | undefined;
-                          const effects = tmpl?.effects as any[] | undefined;
+                          const tmpl = gameState.cardTemplates[card.templateId];
+                          const choices = tmpl?.choices;
+                          const effects = tmpl?.effects;
                           return (
                             <div key={card.instanceId} style={{ marginBottom: '0.75rem', padding: '0.6rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '8px' }}>
                               <div style={{ fontWeight: 'bold', fontSize: '0.85rem' }}>{tmpl?.name ?? 'Modifier'}</div>
                               <div style={{ fontSize: '0.72rem', color: '#555', margin: '0.2rem 0 0.5rem' }}>{tmpl?.abilityText ?? ''}</div>
                               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                {choices ? choices.map((choice: any, i: number) => {
-                                  const upgrade = (choice.conditionalUpgrades as any[] | undefined)?.find(
-                                    (u: any) => u.condition?.rollContext === mPhase.rollContext
+                                {choices ? choices.map((choice, i) => {
+                                  const upgrade = choice.conditionalUpgrades?.find(
+                                    u => u.condition?.rollContext === mPhase.rollContext
                                   );
                                   const effectiveLabel: string = upgrade?.label ?? choice.label ?? '?';
                                   const effectiveAmount: number = upgrade?.effects?.[0]?.amount ?? choice.effects?.[0]?.amount ?? 0;

@@ -90,8 +90,8 @@ export default function OpponentInformationCard({ gameState, myId, selectedOppon
                             {viewedItemId === card.equippedItem && equippedTemplate && (
                                 <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '6px' }}>
                                 <div style={{ fontWeight: 'bold' }}>{equippedTemplate.name}</div>
-                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{(equippedTemplate as any).type || ''}</div>
-                                <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#333' }}>{((equippedTemplate as any).abilityText as string) || ''}</div>
+                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{equippedTemplate.type}</div>
+                                <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#333' }}>{equippedTemplate.abilityText ?? ''}</div>
                                 <div style={{ marginTop: '0.5rem' }}>
                                     <button type="button" onClick={() => setViewedItemId(null)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>Close</button>
                                 </div>

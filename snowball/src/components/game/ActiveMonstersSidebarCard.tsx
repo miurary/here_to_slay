@@ -1,4 +1,4 @@
-import type { CardInstance, GameState, PlayerState } from "../../../../shared/types";
+import type { CardInstance, CardTemplate, GameState, PlayerState } from "../../../../shared/types";
 
 interface ActiveMonstersSidebarCardProps {
     gameState: GameState;
@@ -10,22 +10,22 @@ interface ActiveMonstersSidebarCardProps {
 }
 
 function getEffectiveClass(card: CardInstance, gameState: GameState, player: PlayerState): string | undefined {
-    const template = gameState.cardTemplates[card.templateId] as any;
-    const baseClass = template?.class as string | undefined;
+    const template = gameState.cardTemplates[card.templateId];
+    const baseClass = template?.class;
     if (!card.equippedItem) return baseClass;
     const itemInst = player.zones.party.find(c => c.instanceId === card.equippedItem);
     if (!itemInst) return baseClass;
-    const itemTemplate = gameState.cardTemplates[itemInst.templateId] as any;
-    const passives = itemTemplate?.passiveModifiers as Array<{ stat: string; override?: string }> | undefined;
+    const itemTemplate = gameState.cardTemplates[itemInst.templateId];
+    const passives = itemTemplate?.passiveModifiers;
     return passives?.find(p => p.stat === 'class' && p.override)?.override ?? baseClass;
 }
 
 function checkRequirements(
     player: PlayerState,
-    monsterTemplate: any,
+    monsterTemplate: CardTemplate | undefined,
     gameState: GameState
 ): { met: boolean; items: Array<{ label: string; met: boolean }> } {
-    const reqs = (monsterTemplate?.requirements as Array<{ class: string; amount: number }> | undefined) ?? [];
+    const reqs = monsterTemplate?.requirements ?? [];
     const items: Array<{ label: string; met: boolean }> = [];
 
     for (const req of reqs) {
@@ -60,12 +60,12 @@ export default function ActiveMonstersSidebarCard({
             <h3>Active Monsters</h3>
             <div style={{ display: 'grid', gap: '0.75rem' }}>
                 {gameState.activeMonsters.map((monster) => {
-                    const template = gameState.cardTemplates[monster.templateId] as any;
-                    const lowerBound = template?.lowerBound as number | undefined;
-                    const lowerBoundText = template?.lowerBoundText as string | undefined;
-                    const upperBound = template?.upperBound as number | undefined;
-                    const upperBoundText = template?.upperBoundText as string | undefined;
-                    const slainEffectText = template?.slainEffectText as string | undefined;
+                    const template = gameState.cardTemplates[monster.templateId];
+                    const lowerBound = template?.lowerBound;
+                    const lowerBoundText = template?.lowerBoundText;
+                    const upperBound = template?.upperBound;
+                    const upperBoundText = template?.upperBoundText;
+                    const slainEffectText = template?.slainEffectText;
                     const isSelected = selectedMonsterId === monster.instanceId;
 
                     const reqResult = myPlayer

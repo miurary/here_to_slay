@@ -7,13 +7,12 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 
-import type { ClientToServerEvents, ServerToClientEvents, CardInstance, GameState, Player, MonsterInstance } from '../shared/types.js'
+import type { ClientToServerEvents, ServerToClientEvents, CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState } from '../../shared/src/types.js'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const cardsDir = join(__dirname, 'cards');
 
-type CardTemplate = { id: string; type: string; name: string; [key: string]: any };
 
 const shuffle = <T>(items: T[]): T[] => {
   return items.slice().sort(() => Math.random() - 0.5);
@@ -102,8 +101,8 @@ interface AbilityPromptRequest {
   promptType: AbilityPromptType;
   message: string;
   options: AbilityPromptOption[];
-  effect: any;
-  remainingEffects: any[];
+  effect: Effect;
+  remainingEffects: Effect[];
   isItemTrigger?: boolean;
   itemInstanceId?: string;
   isMagicCard?: boolean;
@@ -121,7 +120,7 @@ interface PendingChallengeState {
   pendingCardType: 'hero' | 'item' | 'magic';
   itemTargetPlayerId?: string;
   itemTargetHeroInstanceId?: string;
-  magicSteps?: any[];
+  magicSteps?: Effect[];
   eligibleChallengerIds: string[];
   passedPlayerIds: Set<string>;
   challengerId?: string;
@@ -187,16 +186,11 @@ const moveCardBetweenZones = (
 
 const getPlayerBySocketId = (gameState: GameState, socketId: string) => gameState.players[socketId];
 
-const findHeroInPlayerParty = (player: Player | undefined, heroInstanceId: string) => player?.zones.party.find((card) => card.instanceId === heroInstanceId && card.cardType === 'hero');
+const findHeroInPlayerParty = (player: Player | undefined, heroInstanceId: string) => player?.zones.party.find((card: CardInstance) => card.instanceId === heroInstanceId && card.cardType === 'hero');
 
-interface PlayerModifier {
-  modifierType: string;
-  amount: number;
-  duration: number;
-}
 
 const getPlayerRollBonus = (player: Player): number => {
-  const modifiers = (player as any).temporaryModifiers as PlayerModifier[] | undefined;
+  const modifiers = player.temporaryModifiers;
   if (!Array.isArray(modifiers)) return 0;
   return modifiers.reduce((total, modifier) => {
     if (modifier.modifierType === 'rollBonus' && typeof modifier.amount === 'number') {
@@ -207,15 +201,15 @@ const getPlayerRollBonus = (player: Player): number => {
 };
 
 const decrementTemporaryModifiers = (player: Player) => {
-  const modifiers = (player as any).temporaryModifiers as PlayerModifier[] | undefined;
+  const modifiers = player.temporaryModifiers;
   if (!Array.isArray(modifiers)) return;
   const remainingModifiers = modifiers
     .map((modifier) => ({ ...modifier, duration: (modifier.duration ?? 0) - 1 }))
     .filter((modifier) => modifier.duration > 0);
   if (remainingModifiers.length > 0) {
-    (player as any).temporaryModifiers = remainingModifiers;
+    player.temporaryModifiers = remainingModifiers;
   } else {
-    delete (player as any).temporaryModifiers;
+    delete player.temporaryModifiers;
   }
 };
 
@@ -225,13 +219,13 @@ const getOpponentPlayerIds = (gameState: GameState, activePlayerId: string) =>
   Object.keys(gameState.players).filter((playerId) => playerId !== activePlayerId);
 
 const getHeroEffectiveClass = (gameState: GameState, player: Player, hero: CardInstance): string | undefined => {
-  const template = gameState.cardTemplates[hero.templateId] as any;
-  const baseClass = template?.class as string | undefined;
+  const template = gameState.cardTemplates[hero.templateId];
+  const baseClass = template?.class;
   if (!hero.equippedItem) return baseClass;
-  const itemInstance = player.zones.party.find(c => c.instanceId === hero.equippedItem);
+  const itemInstance = player.zones.party.find((c: CardInstance) => c.instanceId === hero.equippedItem);
   if (!itemInstance) return baseClass;
-  const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
-  const passives = itemTemplate?.passiveModifiers as Array<{stat: string; override?: string}> | undefined;
+  const itemTemplate = gameState.cardTemplates[itemInstance.templateId];
+  const passives = itemTemplate?.passiveModifiers;
   const classOverride = passives?.find(p => p.stat === 'class' && p.override);
   return classOverride?.override ?? baseClass;
 };
@@ -246,8 +240,8 @@ const checkWinCondition = (gameState: GameState, player: Player): boolean => {
   // Condition 2: one of each of the 7 party-leader classes represented in the party
   const partyClasses = new Set(
     player.zones.party
-      .map(card => getHeroEffectiveClass(gameState, player, card)?.toLowerCase())
-      .filter((c): c is string => c !== undefined)
+      .map((card: CardInstance) => getHeroEffectiveClass(gameState, player, card)?.toLowerCase())
+      .filter((c: string | undefined): c is string => !!c)
   );
   return WIN_CLASSES.every(cls => partyClasses.has(cls));
 };
@@ -256,7 +250,7 @@ const applyWinIfMet = (gameState: GameState, player: Player, playerId: string): 
   if (gameState.status === 'finished') return true;
   if (checkWinCondition(gameState, player)) {
     gameState.status = 'finished';
-    (gameState as any).winnerId = playerId;
+    gameState.winnerId = playerId;
     return true;
   }
   return false;
@@ -266,10 +260,10 @@ const promptForPlayerSelection = (
   sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
   gameState: GameState,
   heroInstanceId: string,
-  effect: any,
+  effect: Effect,
   eligiblePlayerIds: string[],
   message: string,
-  remainingEffects: any[] = []
+  remainingEffects: Effect[] = []
 ) => {
   const options = eligiblePlayerIds.map((playerId) => ({
     id: playerId,
@@ -294,10 +288,10 @@ const promptForCardSelection = (
   sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
   gameState: GameState,
   heroInstanceId: string,
-  effect: any,
+  effect: Effect,
   cardOptions: CardInstance[],
   message: string,
-  remainingEffects: any[] = []
+  remainingEffects: Effect[] = []
 ) => {
   const options = cardOptions.map((card) => ({
     id: card.instanceId,
@@ -324,7 +318,7 @@ const processHeroAbilityEffects = (
   player: Player,
   hero: CardInstance,
   template: CardTemplate,
-  effects: any[],
+  effects: Effect[],
   responsePayload?: { playerId?: string; cardInstanceId?: string }
 ): string | undefined => {
   const messages: string[] = [];
@@ -333,6 +327,7 @@ const processHeroAbilityEffects = (
   for (let i = 0; i < effects.length; i++) {
     if (promptCreated) break;
     const effect = effects[i];
+    if (!effect) continue;
     const remainingAfterThis = effects.slice(i + 1);
     let effectResult: string | undefined;
 
@@ -349,7 +344,7 @@ const processHeroAbilityEffects = (
         const targetZone = effect.destination === 'hand' ? player.zones.hand
           : effect.destination === 'party' ? player.zones.party
           : gameState.discardPile;
-        const targetReq = (template as any).targetRequirement;
+        const targetReq = template.targetRequirement;
 
         if (responsePayload?.cardInstanceId) {
           let sourceZone: CardInstance[];
@@ -398,8 +393,8 @@ const processHeroAbilityEffects = (
           break;
         }
 
-        const cardTypeFilter = targetReq?.cardType as string | undefined;
-        const candidates = gameState.discardPile.filter((card) =>
+        const cardTypeFilter = targetReq?.cardType;
+        const candidates = gameState.discardPile.filter((card: CardInstance) =>
           !cardTypeFilter || card.cardType === cardTypeFilter
         );
         if (candidates.length === 0) { effectResult = `No valid ${cardTypeFilter || ''} cards in the discard pile.`; break; }
@@ -420,9 +415,9 @@ const processHeroAbilityEffects = (
             const opponent = gameState.players[opponentId];
             if (!opponent) continue;
             if (effect.condition && effect.condition.type === 'HAS_CARD_IN_ZONE') {
-              const zone = effect.condition.zone as keyof typeof opponent.zones;
-              const requiredClass = (effect.condition.class || effect.condition.cardClass) as string | undefined;
-              const hasCard = !!opponent.zones[zone]?.some((card) => {
+              const zoneName = effect.condition.zone as keyof typeof opponent.zones | undefined;
+              const requiredClass = effect.condition.class ?? effect.condition.cardClass;
+              const hasCard = !!zoneName && !!opponent.zones[zoneName]?.some((card: CardInstance) => {
                 return requiredClass ? getHeroEffectiveClass(gameState, opponent, card)?.toLowerCase() === requiredClass?.toLowerCase() : true;
               });
               if (!hasCard) {
@@ -430,7 +425,7 @@ const processHeroAbilityEffects = (
                 continue;
               }
             }
-            const options = opponent.zones.hand.map((card) => ({
+            const options = opponent.zones.hand.map((card: CardInstance) => ({
               id: card.instanceId,
               label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
               payload: { cardInstanceId: card.instanceId },
@@ -468,7 +463,7 @@ const processHeroAbilityEffects = (
             if (!targetPlayer) return 'Selected player not found.';
             const targetSocket = getSocketByPlayerId(responsePayload.playerId);
             if (!targetSocket) return 'Selected player not connected.';
-            const options = targetPlayer.zones.hand.map((card) => ({
+            const options = targetPlayer.zones.hand.map((card: CardInstance) => ({
               id: card.instanceId,
               label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
               payload: { cardInstanceId: card.instanceId },
@@ -509,7 +504,7 @@ const processHeroAbilityEffects = (
       }
       case 'PROMPT_SACRIFICE': {
         if (responsePayload?.cardInstanceId) {
-          const sacrificeIndex = player.zones.party.findIndex((c) => c.instanceId === responsePayload.cardInstanceId);
+          const sacrificeIndex = player.zones.party.findIndex((c: CardInstance) => c.instanceId === responsePayload.cardInstanceId);
           if (sacrificeIndex === -1) { effectResult = 'Selected card not found in party.'; break; }
           const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
           if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
@@ -527,7 +522,7 @@ const processHeroAbilityEffects = (
             }
           }
           if (sacrificedCard.cardType === 'item') {
-            const attachedHero = player.zones.party.find((c) => c.equippedItem === sacrificedCard.instanceId);
+            const attachedHero = player.zones.party.find((c: CardInstance) => c.equippedItem === sacrificedCard.instanceId);
             if (attachedHero) delete attachedHero.equippedItem;
           }
           effectResult = psMsg;
@@ -540,8 +535,8 @@ const processHeroAbilityEffects = (
             const opponent = gameState.players[opponentId];
             if (!opponent) continue;
             const options = opponent.zones.party
-              .filter((card) => card.cardType !== 'party_leader')
-              .map((card) => ({
+              .filter((card: CardInstance) => card.cardType !== 'party_leader')
+              .map((card: CardInstance) => ({
                 id: card.instanceId,
                 label: gameState.cardTemplates[card.templateId]?.name || card.templateId,
                 payload: { cardInstanceId: card.instanceId },
@@ -577,7 +572,7 @@ const processHeroAbilityEffects = (
       }
       case 'SLAY': {
         if (responsePayload?.cardInstanceId) {
-          const monsterIndex = gameState.activeMonsters.findIndex((m) => m.instanceId === responsePayload.cardInstanceId);
+          const monsterIndex = gameState.activeMonsters.findIndex((m: MonsterInstance) => m.instanceId === responsePayload.cardInstanceId);
           if (monsterIndex === -1) { effectResult = 'Monster not found.'; break; }
           const [slain] = gameState.activeMonsters.splice(monsterIndex, 1);
           if (!slain) { effectResult = 'Failed to slay monster.'; break; }
@@ -590,7 +585,7 @@ const processHeroAbilityEffects = (
         }
         if (effect.target === 'selected') {
           if (gameState.activeMonsters.length === 0) { effectResult = 'No monsters available to slay.'; break; }
-          const slayOptions = gameState.activeMonsters.map((m) => ({
+          const slayOptions = gameState.activeMonsters.map((m: MonsterInstance) => ({
             id: m.instanceId,
             label: gameState.cardTemplates[m.templateId]?.name || m.templateId,
             payload: { cardInstanceId: m.instanceId },
@@ -613,16 +608,16 @@ const processHeroAbilityEffects = (
         break;
       }
       case 'APPLY_ROOM_FLAG': {
-        const roomFlags = (gameState as any).roomFlags ?? {};
-        roomFlags[effect.flag as string] = true;
-        (gameState as any).roomFlags = roomFlags;
-        effectResult = `Applied: ${(effect.flag as string) || 'unknown'}.`;
+        const roomFlags = gameState.roomFlags ?? {};
+        if (effect.flag) roomFlags[effect.flag] = true;
+        gameState.roomFlags = roomFlags;
+        effectResult = `Applied: ${effect.flag || 'unknown'}.`;
         break;
       }
       case 'APPLY_PLAYER_MODIFIER': {
-        const playerModifiers = (player as any).temporaryModifiers ?? [];
-        playerModifiers.push({ modifierType: effect.modifierType, amount: effect.amount ?? 0, duration: typeof effect.duration === 'number' ? effect.duration : 1 });
-        (player as any).temporaryModifiers = playerModifiers;
+        const playerModifiers = player.temporaryModifiers ?? [];
+        playerModifiers.push({ modifierType: effect.modifierType ?? '', amount: effect.amount ?? 0, duration: effect.duration ?? 1 });
+        player.temporaryModifiers = playerModifiers;
         effectResult = `Applied modifier: ${effect.modifierType} ${effect.amount}.`;
         break;
       }
@@ -630,7 +625,7 @@ const processHeroAbilityEffects = (
         if (responsePayload?.playerId) {
           const targetPlayer = gameState.players[responsePayload.playerId];
           if (!targetPlayer) return 'Player not found.';
-          const cardNames = targetPlayer.zones.hand.map((card) => gameState.cardTemplates[card.templateId]?.name || card.templateId);
+          const cardNames = targetPlayer.zones.hand.map((card: CardInstance) => gameState.cardTemplates[card.templateId]?.name || card.templateId);
           return `${targetPlayer.username || 'Player'} has: ${cardNames.join(', ') || 'no cards'}.`;
         }
         const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, sourceSocket.id));
@@ -645,8 +640,8 @@ const processHeroAbilityEffects = (
             const opponent = gameState.players[playerId];
             if (!opponent) return false;
             if (effect.condition.type === 'HAS_CARD_IN_ZONE') {
-              return opponent.zones[effect.condition.zone as keyof typeof opponent.zones]?.some((card) => {
-                return getHeroEffectiveClass(gameState, opponent, card)?.toLowerCase() === effect.condition.cardClass?.toLowerCase();
+              return opponent.zones[effect.condition.zone as keyof typeof opponent.zones]?.some((card: CardInstance) => {
+                return getHeroEffectiveClass(gameState, opponent, card)?.toLowerCase() === effect.condition?.cardClass?.toLowerCase();
               });
             }
             return true;
@@ -679,10 +674,10 @@ const processHeroAbilityEffects = (
         break;
       }
       case 'PLAY_FROM_HAND': {
-        const candidates = player.zones.hand.filter((card) => card.cardType === (effect.cardType as string));
+        const candidates = player.zones.hand.filter((card: CardInstance) => card.cardType === (effect.cardType as string));
         if (candidates.length === 0) { effectResult = `No ${effect.cardType} cards available to play.`; break; }
         if (responsePayload?.cardInstanceId) {
-          const index = player.zones.hand.findIndex((card) => card.instanceId === responsePayload.cardInstanceId);
+          const index = player.zones.hand.findIndex((card: CardInstance) => card.instanceId === responsePayload.cardInstanceId);
           if (index === -1) { effectResult = 'Selected card not found in hand.'; break; }
           const [card] = player.zones.hand.splice(index, 1);
           if (!card) { effectResult = 'Failed to play card from hand.'; break; }
@@ -701,7 +696,7 @@ const processHeroAbilityEffects = (
       }
       case 'SACRIFICE': {
         if (!responsePayload?.cardInstanceId) { effectResult = 'No card selected for sacrifice.'; break; }
-        const sacrificeIndex = player.zones.party.findIndex((c) => c.instanceId === responsePayload.cardInstanceId);
+        const sacrificeIndex = player.zones.party.findIndex((c: CardInstance) => c.instanceId === responsePayload.cardInstanceId);
         if (sacrificeIndex === -1) { effectResult = 'Selected card not found in party.'; break; }
         const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
         if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
@@ -709,7 +704,7 @@ const processHeroAbilityEffects = (
         const sacrificedName = gameState.cardTemplates[sacrificedCard.templateId]?.name || sacrificedCard.templateId;
         let sacrificeMsg = `Sacrificed ${sacrificedName}.`;
         if (sacrificedCard.cardType === 'hero' && sacrificedCard.equippedItem) {
-          const itemIndex = player.zones.party.findIndex((c) => c.instanceId === sacrificedCard.equippedItem);
+          const itemIndex = player.zones.party.findIndex((c: CardInstance) => c.instanceId === sacrificedCard.equippedItem);
           if (itemIndex !== -1) {
             const [sacrificedItem] = player.zones.party.splice(itemIndex, 1);
             if (sacrificedItem) {
@@ -719,14 +714,14 @@ const processHeroAbilityEffects = (
           }
         }
         if (sacrificedCard.cardType === 'item') {
-          const attachedHero = player.zones.party.find((c) => c.equippedItem === sacrificedCard.instanceId);
+          const attachedHero = player.zones.party.find((c: CardInstance) => c.equippedItem === sacrificedCard.instanceId);
           if (attachedHero) delete attachedHero.equippedItem;
         }
         effectResult = sacrificeMsg;
         break;
       }
       case 'FORCE_END_TURN': {
-        (gameState as any).forceEndTurn = sourceSocket.id;
+        gameState.forceEndTurn = sourceSocket.id;
         effectResult = 'Ending turn.';
         break;
       }
@@ -751,12 +746,12 @@ const emitItemTriggerPrompt = (
   player: Player,
   hero: CardInstance,
   itemInstance: CardInstance,
-  itemTemplate: any,
+  itemTemplate: CardTemplate,
   sendRoomUpdate: () => void
 ): boolean => {
-  const trigger = itemTemplate.trigger as { event: string; optional?: boolean; effects: any[] } | undefined;
+  const trigger = itemTemplate.trigger;
   if (!trigger) return false;
-  const effectAction = trigger.effects[0]?.action as string | undefined;
+  const effectAction = trigger.effects[0]?.action;
   if (!effectAction) return false;
 
   switch (effectAction) {
@@ -782,8 +777,8 @@ const emitItemTriggerPrompt = (
     }
     case 'PROMPT_SACRIFICE_HERO': {
       const heroOptions = player.zones.party
-        .filter(c => c.cardType === 'hero')
-        .map(c => ({
+        .filter((c: CardInstance) => c.cardType === 'hero')
+        .map((c: CardInstance) => ({
           id: c.instanceId,
           label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
           payload: { cardInstanceId: c.instanceId },
@@ -806,7 +801,7 @@ const emitItemTriggerPrompt = (
       return true;
     }
     case 'DISCARD': {
-      const cardOptions = player.zones.hand.map(c => ({
+      const cardOptions = player.zones.hand.map((c: CardInstance) => ({
         id: c.instanceId,
         label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
         payload: { cardInstanceId: c.instanceId },
@@ -833,15 +828,16 @@ const emitItemTriggerPrompt = (
   }
 };
 
-const checkMonsterRequirements = (gameState: GameState, player: Player, monsterTemplate: any): { met: boolean; missing: string } => {
-  const reqs = (monsterTemplate.requirements as Array<{ class: string; amount: number }> | undefined) ?? [];
+const checkMonsterRequirements = (gameState: GameState, player: Player, monsterTemplate: CardTemplate | undefined): { met: boolean; missing: string } => {
+  if (!monsterTemplate) return { met: false, missing: 'Monster template not found' };
+  const reqs = monsterTemplate.requirements ?? [];
   for (const req of reqs) {
     const classLower = req.class.toLowerCase();
     if (classLower === 'hero') {
-      const count = player.zones.party.filter(c => c.cardType === 'hero').length;
+      const count = player.zones.party.filter((c: CardInstance) => c.cardType === 'hero').length;
       if (count < req.amount) return { met: false, missing: `${req.amount} hero card${req.amount > 1 ? 's' : ''} in party (have ${count})` };
     } else {
-      const count = player.zones.party.filter(c => {
+      const count = player.zones.party.filter((c: CardInstance) => {
         const effectiveClass = getHeroEffectiveClass(gameState, player, c);
         return effectiveClass?.toLowerCase() === classLower;
       }).length;
@@ -854,86 +850,87 @@ const checkMonsterRequirements = (gameState: GameState, player: Player, monsterT
 const getPartyLeaderHeroAbilityBonus = (gameState: GameState, playerId: string): number => {
   const player = gameState.players[playerId];
   if (!player?.partyLeaderId) return 0;
-  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId];
   if (
     leaderTemplate?.effect?.triggerEvent === 'ON_HERO_ABILITY_ROLL' &&
     leaderTemplate.effect.action === 'PERSISTENT_MODIFIER' &&
     leaderTemplate.effect.applies_to === 'HERO_ABILITY_ROLLS'
-  ) return (leaderTemplate.effect.modifier as number) ?? 0;
+  ) return leaderTemplate.effect.modifier ?? 0;
   return 0;
 };
 
 const getSlainMonsterHeroAbilityBonus = (gameState: GameState, player: Player): number =>
-  (player.slainMonsters ?? []).reduce((total, m) => {
-    const t = gameState.cardTemplates[m.templateId] as any;
+  (player.slainMonsters ?? []).reduce((total, m: CardInstance) => {
+    const t = gameState.cardTemplates[m.templateId];
     if (
       t?.slainEffect?.action === 'PERSISTENT_MODIFIER' &&
       t.slainEffect.applies_to === 'HERO_ABILITY_ROLLS'
-    ) return total + ((t.slainEffect.modifier as number) ?? 0);
+    ) return total + (t.slainEffect.modifier ?? 0);
     return total;
   }, 0);
 
 const getMonsterAttackRollBonus = (gameState: GameState, player: Player): number => {
   if (!player.partyLeaderId) return 0;
-  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId];
   if (
     leaderTemplate?.effect?.triggerEvent === 'ON_ATTACK_ROLL' &&
     leaderTemplate.effect.action === 'APPLY_ROLL_MODIFIER'
-  ) return (leaderTemplate.effect.amount as number) ?? 0;
+  ) return leaderTemplate.effect.amount ?? 0;
   return 0;
 };
 
 const playerHasSlainEffectFlag = (gameState: GameState, player: Player, flag: string): boolean =>
-  (player.slainMonsters ?? []).some(m => {
-    const t = gameState.cardTemplates[m.templateId] as any;
+  (player.slainMonsters ?? []).some((m: CardInstance) => {
+    const t = gameState.cardTemplates[m.templateId];
     return t?.slainEffect?.flag === flag;
   });
 
 const getOpponentsWithModifiers = (gameState: GameState, rollingPlayerId: string): string[] =>
   Object.entries(gameState.players)
     .filter(([pid]) => pid !== rollingPlayerId)
-    .filter(([, p]) => p.zones.hand.some(c => c.cardType === 'modifier'))
+    .filter(([, p]) => (p as PlayerState).zones.hand.some((c: CardInstance) => c.cardType === 'modifier'))
     .map(([pid]) => pid);
 
-const getModifierAmount = (template: any, choiceIndex: number, rollContext: string): number => {
-  const choices = template?.choices as any[] | undefined;
+const getModifierAmount = (template: CardTemplate | undefined, choiceIndex: number, rollContext: string): number => {
+  const choices = template?.choices;
   if (choices) {
     const choice = choices[choiceIndex];
     if (!choice) return 0;
-    const upgrades = choice.conditionalUpgrades as any[] | undefined;
+    const upgrades = choice.conditionalUpgrades;
     if (upgrades) {
       for (const upgrade of upgrades) {
         if (upgrade.condition?.rollContext === rollContext) {
-          return (upgrade.effects?.[0]?.amount as number) ?? 0;
+          return upgrade.effects?.[0]?.amount ?? 0;
         }
       }
     }
-    return (choice.effects?.[0]?.amount as number) ?? 0;
+    return choice.effects?.[0]?.amount ?? 0;
   }
-  return (template?.effects?.[0]?.amount as number) ?? 0;
+  return template?.effects?.[0]?.amount ?? 0;
 };
 
-const getModifierChoiceLabel = (template: any, choiceIndex: number, rollContext: string): string => {
-  const choices = template?.choices as any[] | undefined;
+const getModifierChoiceLabel = (template: CardTemplate | undefined, choiceIndex: number, rollContext: string): string => {
+  const choices = template?.choices;
   if (choices) {
     const choice = choices[choiceIndex];
     if (!choice) return '?';
-    const upgrades = choice.conditionalUpgrades as any[] | undefined;
+    const upgrades = choice.conditionalUpgrades;
     if (upgrades) {
       for (const upgrade of upgrades) {
-        if (upgrade.condition?.rollContext === rollContext) return (upgrade.label as string) ?? choice.label;
+        if (upgrade.condition?.rollContext === rollContext) return upgrade.label ?? choice.label ?? '?';
       }
     }
-    return (choice.label as string) ?? '?';
+    return choice.label ?? '?';
   }
-  const amount = (template?.effects?.[0]?.amount as number) ?? 0;
+  const amount = template?.effects?.[0]?.amount ?? 0;
   return amount >= 0 ? `+${amount}` : `${amount}`;
 };
 
 const updateModifierPhaseGameState = (_roomCode: string, phase: ModifierPhaseState, gameState: GameState) => {
   const currentTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
   const activePlayerId = phase.phase === 'roller_turn' ? phase.rollingPlayerId : (phase.opponentQueue[0] ?? '');
-  (gameState as any).modifierPhase = {
+  const monsterName = phase.monsterInstanceId ? gameState.cardTemplates[phase.monsterInstanceId]?.name : undefined;
+  gameState.modifierPhase = {
     heroInstanceId: phase.heroInstanceId,
     rollingPlayerId: phase.rollingPlayerId,
     requiredRoll: phase.requiredRoll,
@@ -946,15 +943,15 @@ const updateModifierPhaseGameState = (_roomCode: string, phase: ModifierPhaseSta
     activePlayerId,
     rollContext: phase.rollContext,
     rollType: phase.rollType,
-    monsterName: (gameState.cardTemplates[phase.monsterInstanceId ?? ''] as any)?.name,
-    lowerBound: phase.lowerBound,
     modifiersPlayed: phase.modifiersPlayed,
+    ...(monsterName !== undefined ? { monsterName } : {}),
+    ...(phase.lowerBound !== undefined ? { lowerBound: phase.lowerBound } : {}),
   };
 };
 
 // All slain effects (EXTRA_AP, blockItemChallenges, PERSISTENT_MODIFIER) are read
 // dynamically from player.slainMonsters at the point of use — no extra setup needed here.
-const applySlainEffect = (_roomCode: string, _gameState: GameState, _player: Player, _monsterTemplate: any) => {};
+const applySlainEffect = () => {};
 
 const promptMonsterDiscard = (
   socket: Socket<ClientToServerEvents, ServerToClientEvents>,
@@ -967,7 +964,7 @@ const promptMonsterDiscard = (
   effectText: string,
   sendRoomUpdate: () => void
 ) => {
-  const opts = player.zones.hand.map(c => ({
+  const opts = player.zones.hand.map((c: CardInstance) => ({
     id: c.instanceId,
     label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
     payload: { cardInstanceId: c.instanceId },
@@ -998,8 +995,8 @@ const promptMonsterSacrifice = (
   sendRoomUpdate: () => void
 ) => {
   const heroOptions = player.zones.party
-    .filter(c => c.cardType === 'hero')
-    .map(c => ({
+    .filter((c: CardInstance) => c.cardType === 'hero')
+    .map((c: CardInstance) => ({
       id: c.instanceId,
       label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
       payload: { cardInstanceId: c.instanceId },
@@ -1026,23 +1023,23 @@ const applyMonsterAttackEffects = (
   gameState: GameState,
   player: Player,
   monster: MonsterInstance,
-  monsterTemplate: any,
+  monsterTemplate: CardTemplate,
   finalTotal: number,
   sendRoomUpdate: () => void
 ) => {
-  const upperBound = (monsterTemplate.upperBound as number) ?? 99;
-  const lowerBound = (monsterTemplate.lowerBound as number) ?? 0;
-  const monsterName = (monsterTemplate.name as string) ?? monster.templateId;
+  const upperBound = monsterTemplate.upperBound ?? 99;
+  const lowerBound = monsterTemplate.lowerBound ?? 0;
+  const monsterName = monsterTemplate.name ?? monster.templateId;
 
-  let effects: any[] = [];
+  let effects: Effect[] = [];
   let effectText = '';
 
   if (finalTotal >= upperBound) {
-    effects = (monsterTemplate.upperBoundEffect as any[]) ?? [];
-    effectText = (monsterTemplate.upperBoundText as string) ?? '';
+    effects = monsterTemplate.upperBoundEffect ?? [];
+    effectText = monsterTemplate.upperBoundText ?? '';
   } else if (finalTotal < lowerBound) {
-    effects = (monsterTemplate.lowerBoundEffect as any[]) ?? [];
-    effectText = (monsterTemplate.lowerBoundText as string) ?? '';
+    effects = monsterTemplate.lowerBoundEffect ?? [];
+    effectText = monsterTemplate.lowerBoundText ?? '';
   }
 
   // Broadcast result immediately before any prompts
@@ -1057,7 +1054,7 @@ const applyMonsterAttackEffects = (
 
   for (const effect of effects) {
     if (effect.action === 'SLAY') {
-      const monsterIdx = gameState.activeMonsters.findIndex(m => m.instanceId === monster.instanceId);
+      const monsterIdx = gameState.activeMonsters.findIndex((m: MonsterInstance) => m.instanceId === monster.instanceId);
       if (monsterIdx !== -1) {
         const [slainMonster] = gameState.activeMonsters.splice(monsterIdx, 1);
         if (slainMonster) {
@@ -1065,24 +1062,22 @@ const applyMonsterAttackEffects = (
           player.slainMonsters.push(slainMonster);
           // p_001 Raging Manticore: draw N cards on slay
           if (player.partyLeaderId) {
-            const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+            const plTemplate = gameState.cardTemplates[player.partyLeaderId];
             if (plTemplate?.effect?.triggerEvent === 'ON_SLAY' && plTemplate.effect.action === 'DRAW') {
-              const drawCount = (plTemplate.effect.amount as number) ?? 1;
-              player.zones.hand.push(...drawCards(gameState.mainDeck, drawCount));
+              player.zones.hand.push(...drawCards(gameState.mainDeck, plTemplate.effect.amount ?? 1));
             }
           }
           if (gameState.monsterDeck.length > 0) {
             const [replacement] = gameState.monsterDeck.splice(0, 1);
             if (replacement) gameState.activeMonsters.push(replacement as MonsterInstance);
           }
-          applySlainEffect(roomCode, gameState, player, monsterTemplate);
+          applySlainEffect();
         }
       }
     } else if (effect.action === 'DRAW') {
-      const amount = (effect.amount as number) ?? 1;
-      player.zones.hand.push(...drawCards(gameState.mainDeck, amount));
+      player.zones.hand.push(...drawCards(gameState.mainDeck, effect.amount ?? 1));
     } else if (effect.action === 'DISCARD') {
-      const amount = effect.amount as number;
+      const amount = effect.amount ?? 0;
       if (amount < 0 || player.zones.hand.length <= amount) {
         gameState.discardPile.push(...player.zones.hand);
         player.zones.hand = [];
@@ -1107,7 +1102,7 @@ const executeMonsterAttackRoll = (
   gameState: GameState,
   player: Player,
   monster: MonsterInstance,
-  monsterTemplate: any,
+  monsterTemplate: CardTemplate,
   sendRoomUpdate: () => void
 ) => {
   const die1 = Math.floor(Math.random() * 6) + 1;
@@ -1115,9 +1110,9 @@ const executeMonsterAttackRoll = (
   const attackBonus = getMonsterAttackRollBonus(gameState, player);
   const rawDiceTotal = die1 + die2;
   const currentTotal = rawDiceTotal + attackBonus;
-  const upperBound = (monsterTemplate.upperBound as number) ?? 99;
-  const lowerBound = (monsterTemplate.lowerBound as number) ?? 0;
-  const monsterName = (monsterTemplate.name as string) ?? monster.templateId;
+  const upperBound = monsterTemplate.upperBound ?? 99;
+  const lowerBound = monsterTemplate.lowerBound ?? 0;
+  const monsterName = monsterTemplate.name ?? monster.templateId;
 
   const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
@@ -1166,15 +1161,16 @@ const finalizeRoll = (
   const finalTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
 
   modifierPhases.delete(roomCode);
-  delete (gameState as any).modifierPhase;
+  delete gameState.modifierPhase;
 
   if (phase.rollType === 'monster_attack') {
     const monster = gameState.activeMonsters.find(m => m.instanceId === phase.monsterInstanceId);
     const player = gameState.players[phase.rollingPlayerId];
     const rollingSocket = getSocketByPlayerId(phase.rollingPlayerId);
     if (monster && player && rollingSocket) {
-      const monsterTemplate = gameState.cardTemplates[monster.templateId] as any;
-      applyMonsterAttackEffects(roomCode, rollingSocket as any, gameState, player, monster, monsterTemplate, finalTotal, sendRoomUpdate);
+      const monsterTemplate = gameState.cardTemplates[monster.templateId];
+      if (monsterTemplate) applyMonsterAttackEffects(roomCode, rollingSocket, gameState, player, monster, monsterTemplate, finalTotal, sendRoomUpdate);
+      else sendRoomUpdate();
     } else {
       sendRoomUpdate();
     }
@@ -1208,14 +1204,16 @@ const finalizeRoll = (
       if (equippedItemId) {
         const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
         if (itemInstance) {
-          const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
-          const itemTrigger = itemTemplate?.trigger as { event: string; scope: string } | undefined;
-          if (itemTrigger?.scope === 'equipped_hero') {
-            if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
-              if (emitItemTriggerPrompt(rollingSocket as any, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
-            }
-            if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
-              if (emitItemTriggerPrompt(rollingSocket as any, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+          const itemTemplate = gameState.cardTemplates[itemInstance.templateId];
+          if (itemTemplate) {
+            const itemTrigger = itemTemplate.trigger;
+            if (itemTrigger?.scope === 'equipped_hero') {
+              if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
+                if (emitItemTriggerPrompt(rollingSocket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+              }
+              if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
+                if (emitItemTriggerPrompt(rollingSocket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+              }
             }
           }
         }
@@ -1291,14 +1289,16 @@ const executeRollAndEmit = (
     if (equippedItemId) {
       const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
       if (itemInstance) {
-        const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
-        const itemTrigger = itemTemplate?.trigger as { event: string; scope: string } | undefined;
-        if (itemTrigger?.scope === 'equipped_hero') {
-          if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
-            if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
-          }
-          if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
-            if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+        const itemTemplate = gameState.cardTemplates[itemInstance.templateId];
+        if (itemTemplate) {
+          const itemTrigger = itemTemplate.trigger;
+          if (itemTrigger?.scope === 'equipped_hero') {
+            if (!success && itemTrigger.event === 'ON_HERO_ROLL_FAIL') {
+              if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+            }
+            if (success && itemTrigger.event === 'ON_HERO_ROLL_SUCCESS') {
+              if (emitItemTriggerPrompt(socket, gameState, player, hero, itemInstance, itemTemplate, sendRoomUpdate)) return;
+            }
           }
         }
       }
@@ -1336,7 +1336,7 @@ const getEligibleChallengerIds = (gameState: GameState, activePlayerId: string):
     .filter(([, player]) =>
       player.zones.hand.some(card => {
         if (card.cardType !== 'challenge') return false;
-        const template = gameState.cardTemplates[card.templateId] as any;
+        const template = gameState.cardTemplates[card.templateId];
         const req = template?.onEvent?.requirement;
         if (!req) return true;
         if (req.cardType === 'hero' && req.class && req.eligibility === 'self') {
@@ -1349,23 +1349,24 @@ const getEligibleChallengerIds = (gameState: GameState, activePlayerId: string):
     )
     .map(([pid]) => pid);
 
-const getChallengeCardBonus = (template: any): number => {
-  const effects = template?.onEvent?.effects as any[] | undefined;
+const getChallengeCardBonus = (template: CardTemplate | undefined): number => {
+  if (!template) return 0;
+  const effects = template.onEvent?.effects;
   if (!effects) return 0;
-  const modifyRoll = effects.find((e: any) => e.action === 'MODIFY_ROLL');
-  return (modifyRoll?.amount as number) ?? 0;
+  const modifyRoll = effects.find(e => e.action === 'MODIFY_ROLL');
+  return modifyRoll?.amount ?? 0;
 };
 
 const getPartyLeaderChallengeBonus = (gameState: GameState, playerId: string): number => {
   const player = gameState.players[playerId];
   if (!player?.partyLeaderId) return 0;
-  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+  const leaderTemplate = gameState.cardTemplates[player.partyLeaderId];
   if (
     leaderTemplate?.effect?.triggerEvent === 'ON_CHALLENGE' &&
     leaderTemplate.effect.action === 'PERSISTENT_MODIFIER' &&
     leaderTemplate.effect.applies_to === 'CHALLENGE_ROLLS'
   ) {
-    return (leaderTemplate.effect.modifier as number) ?? 0;
+    return leaderTemplate.effect.modifier ?? 0;
   }
   return 0;
 };
@@ -1373,7 +1374,7 @@ const getPartyLeaderChallengeBonus = (gameState: GameState, playerId: string): n
 const openChallengeWindow = (roomCode: string, gameState: GameState, pending: PendingChallengeState) => {
   const cardTemplate = gameState.cardTemplates[pending.pendingCardInstance.templateId];
   const pendingCardName = cardTemplate?.name ?? pending.pendingCardInstance.templateId;
-  (gameState as any).pendingChallenge = {
+  gameState.pendingChallenge = {
     pendingPlayerId: pending.pendingPlayerId,
     pendingCardName,
     pendingCardType: pending.pendingCardType,
@@ -1394,7 +1395,7 @@ const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState
     }
     heroesPlayedFromAbilityThisTurn.get(roomCode)!.add(pending.pendingCardInstance.instanceId);
     const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
-    if (playerSocket) (playerSocket as any).emit('heroPlayAccepted', pending.pendingCardInstance.instanceId);
+    if (playerSocket) playerSocket.emit('heroPlayAccepted', pending.pendingCardInstance.instanceId);
   } else if (pending.pendingCardType === 'item') {
     const targetPlayer = gameState.players[pending.itemTargetPlayerId ?? pending.pendingPlayerId];
     if (targetPlayer) {
@@ -1407,7 +1408,7 @@ const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState
     const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
     if (playerSocket && pending.magicSteps) {
       processMagicCardSteps(
-        playerSocket as any,
+        playerSocket,
         gameState,
         player,
         pending.pendingCardInstance.instanceId,
@@ -1449,7 +1450,7 @@ const resolveChallengeRollOff = (
     executePendingCardPlay(roomCode, pending, gameState);
   }
 
-  delete (gameState as any).pendingChallenge;
+  delete gameState.pendingChallenge;
   pendingChallenges.delete(roomCode);
 
   io.to(roomCode).emit('challengeResolved', {
@@ -1474,8 +1475,8 @@ const triggerEndTurn = (
 ) => {
   const currentPlayer = gameState.players[playerId];
   if (currentPlayer) decrementTemporaryModifiers(currentPlayer);
-  delete (gameState as any).roomFlags;
-  delete (gameState as any).forceEndTurn;
+  delete gameState.roomFlags;
+  delete gameState.forceEndTurn;
 
   const playerIds = Object.keys(gameState.players);
   if (playerIds.length === 0) return;
@@ -1491,9 +1492,9 @@ const triggerEndTurn = (
   if (nextPlayer) {
     nextPlayer.actionPoints = 3;
     for (const slainMonster of nextPlayer.slainMonsters ?? []) {
-      const mt = gameState.cardTemplates[slainMonster.templateId] as any;
+      const mt = gameState.cardTemplates[slainMonster.templateId];
       if (mt?.slainEffect?.action === 'EXTRA_AP') {
-        nextPlayer.actionPoints += (mt.slainEffect.amount as number) ?? 0;
+        nextPlayer.actionPoints += mt.slainEffect.amount ?? 0;
       }
     }
     nextPlayer.zones.party.forEach((card) => { card.effectUsedThisTurn = false; });
@@ -1502,9 +1503,9 @@ const triggerEndTurn = (
 
   heroesPlayedFromAbilityThisTurn.delete(roomCode);
   pendingChallenges.delete(roomCode);
-  delete (gameState as any).pendingChallenge;
+  delete gameState.pendingChallenge;
   modifierPhases.delete(roomCode);
-  delete (gameState as any).modifierPhase;
+  delete gameState.modifierPhase;
   sendRoomUpdate();
 };
 
@@ -1526,18 +1527,18 @@ const activateHeroAbility = (
     return;
   }
 
-  const template = gameState.cardTemplates[hero.templateId] as any;
-  if (!template || !template.activeSkill || !Array.isArray(template.activeSkill.effects)) {
+  const template = gameState.cardTemplates[hero.templateId];
+  if (!template?.activeSkill || !Array.isArray(template.activeSkill.effects)) {
     sourceSocket.emit('actionFailed', 'This hero has no ability to activate.');
     return;
   }
 
   // Handle costs (SACRIFICE / DISCARD) before processing effects
-  const costs = (template.activeSkill.costs as any[] | undefined) ?? [];
+  const costs = template.activeSkill.costs ?? [];
 
-  const discardCost = costs.find((c: any) => c.type === 'DISCARD');
+  const discardCost = costs.find(c => c.type === 'DISCARD');
   if (discardCost) {
-    const cardTypeFilter = discardCost.cardType as string | undefined;
+    const cardTypeFilter = discardCost.cardType;
     const discardOptions = player.zones.hand
       .filter((card) => !cardTypeFilter || cardTypeFilter === 'any' || card.cardType === cardTypeFilter)
       .map((card) => ({
@@ -1573,7 +1574,7 @@ const activateHeroAbility = (
     return;
   }
 
-  const sacrificeCost = costs.find((c: any) => c.type === 'SACRIFICE');
+  const sacrificeCost = costs.find(c => c.type === 'SACRIFICE');
   if (sacrificeCost) {
     const sacrificeOptions = player.zones.party
       .filter((card) => card.cardType !== 'party_leader')
@@ -1595,7 +1596,7 @@ const activateHeroAbility = (
       promptType: 'discardCard',
       message: 'Choose a card to sacrifice.',
       options: sacrificeOptions,
-      effect: { action: 'SACRIFICE', ...sacrificeCost },
+      effect: { action: 'SACRIFICE', ...sacrificeCost } as Effect,
       remainingEffects: template.activeSkill.effects,
     });
     sourceSocket.emit('abilityPrompt', {
@@ -1620,7 +1621,7 @@ const activateHeroAbility = (
   if (pendingPrompts.length === 0) {
     hero.effectUsedThisTurn = true;
     if (result) emitAbilityResolution(sourceSocket, heroInstanceId, result);
-    const forcedTurnPlayerId = (gameState as any).forceEndTurn as string | undefined;
+    const forcedTurnPlayerId = gameState.forceEndTurn;
     if (forcedTurnPlayerId) {
       triggerEndTurn(forcedTurnPlayerId, gameState, sourceSocket.data.roomCode as string, sendRoomUpdate);
     } else {
@@ -1635,7 +1636,7 @@ const processMagicCardSteps = (
   gameState: GameState,
   player: Player,
   magicCardId: string,
-  steps: any[],
+  steps: Effect[],
   responsePayload?: { playerId?: string; cardInstanceId?: string; [key: string]: unknown }
 ): string[] => {
   const messages: string[] = [];
@@ -1643,7 +1644,7 @@ const processMagicCardSteps = (
 
   // p_007 Cloaked Sage: draw 1 each time you play a magic card
   if (player.partyLeaderId) {
-    const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+    const plTemplate = gameState.cardTemplates[player.partyLeaderId];
     if (plTemplate?.effect?.triggerEvent === 'ON_DRAW_MAGIC' && plTemplate.effect.action === 'DRAW') {
       player.zones.hand.push(...drawCards(gameState.mainDeck, 1));
     }
@@ -1652,21 +1653,21 @@ const processMagicCardSteps = (
   for (let i = 0; i < steps.length; i++) {
     if (promptCreated) break;
     const step = steps[i];
+    if (!step) continue;
     const remainingSteps = steps.slice(i + 1);
     let stepResult: string | undefined;
 
-    switch (step.action as string) {
+    switch (step.action) {
       case 'DRAW': {
-        const amount = (step.amount as number) ?? 1;
-        const drawn = drawCards(gameState.mainDeck, amount);
+        const drawn = drawCards(gameState.mainDeck, step.amount ?? 1);
         player.zones.hand.push(...drawn);
         stepResult = `Drew ${drawn.length} card${drawn.length === 1 ? '' : 's'}.`;
         break;
       }
       case 'APPLY_ROLL_MODIFIER': {
-        const modifiers = (player as any).temporaryModifiers ?? [];
-        modifiers.push({ modifierType: 'rollBonus', amount: (step.amount as number) ?? 0, duration: 1 });
-        (player as any).temporaryModifiers = modifiers;
+        const modifiers = player.temporaryModifiers ?? [];
+        modifiers.push({ modifierType: 'rollBonus', amount: step.amount ?? 0, duration: 1 });
+        player.temporaryModifiers = modifiers;
         stepResult = `+${step.amount} to all rolls this turn.`;
         break;
       }
@@ -2116,7 +2117,7 @@ const handlePromptResponse = (
     return;
   }
 
-  const template = gameState.cardTemplates[sourceHero.templateId] as any;
+  const template = gameState.cardTemplates[sourceHero.templateId];
   if (!template || !template.activeSkill || !Array.isArray(template.activeSkill.effects)) {
     sourceSocket.emit('actionFailed', 'Hero ability could not be resolved.');
     return;
@@ -2143,7 +2144,7 @@ const handlePromptResponse = (
     if (combinedResult) {
       emitAbilityResolution(sourceSocket, sourceHero.instanceId, combinedResult);
     }
-    const forcedTurnPlayerId = (gameState as any).forceEndTurn as string | undefined;
+    const forcedTurnPlayerId = gameState.forceEndTurn;
     if (forcedTurnPlayerId) {
       triggerEndTurn(forcedTurnPlayerId, gameState, sourceSocket.data.roomCode as string, sendRoomUpdate);
       return;
@@ -2500,7 +2501,7 @@ io.on('connection', (socket: Socket) => {
       socket.emit('actionFailed', 'Selected card is not a magic card.');
       return;
     }
-    const template = gameState.cardTemplates[card.templateId] as any;
+    const template = gameState.cardTemplates[card.templateId];
     if (!template?.effect) {
       socket.emit('actionFailed', 'This magic card has no effect defined.');
       return;
@@ -2510,7 +2511,7 @@ io.on('connection', (socket: Socket) => {
     if (!removedMagicCard) { sendRoomUpdate(); return; }
 
     const magicRoomCode = socket.data.roomCode as string;
-    const steps: any[] = (template.effect.steps as any[] | undefined) ?? [template.effect];
+    const steps: Effect[] = template.effect.steps ?? [template.effect as unknown as Effect];
     const magicEligibleIds = getEligibleChallengerIds(gameState, socket.id);
 
     if (magicEligibleIds.length > 0) {
@@ -2738,7 +2739,7 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const template = gameState.cardTemplates[challengeCard.templateId] as any;
+    const template = gameState.cardTemplates[challengeCard.templateId];
     const req = template?.onEvent?.requirement;
     if (req?.cardType === 'hero' && req.class && req.eligibility === 'self') {
       const hasClass = player.zones.party.some(
@@ -2754,7 +2755,7 @@ io.on('connection', (socket: Socket) => {
     pending.challengeCardInstanceId = challengeCardInstanceId;
     pending.challengerRollBonus = getChallengeCardBonus(template);
 
-    const gsPending = (gameState as any).pendingChallenge;
+    const gsPending = gameState.pendingChallenge;
     if (gsPending) gsPending.challengerId = socket.id;
 
     resolveChallengeRollOff(roomCode, pending, gameState, sendRoomUpdate);
@@ -2775,9 +2776,9 @@ io.on('connection', (socket: Socket) => {
     if (remaining.length === 0) {
       executePendingCardPlay(roomCode, pending, gameState);
       pendingChallenges.delete(roomCode);
-      delete (gameState as any).pendingChallenge;
+      delete gameState.pendingChallenge;
     } else {
-      const gsPending = (gameState as any).pendingChallenge;
+      const gsPending = gameState.pendingChallenge;
       if (gsPending) gsPending.eligibleChallengerIds = remaining;
     }
 
@@ -2820,13 +2821,13 @@ io.on('connection', (socket: Socket) => {
     if (!card) return;
     gameState.discardPile.push(card);
 
-    const template = gameState.cardTemplates[card.templateId] as any;
+    const template = gameState.cardTemplates[card.templateId];
     const amount = getModifierAmount(template, choiceIndex, phase.rollContext);
     const choiceLabel = getModifierChoiceLabel(template, choiceIndex, phase.rollContext);
     phase.accumulatedModifier += amount;
     // p_004 Protecting Horn: +1 (or -1 matching direction) when THIS player plays a modifier
     if (amount !== 0 && player.partyLeaderId) {
-      const plTemplate = gameState.cardTemplates[player.partyLeaderId] as any;
+      const plTemplate = gameState.cardTemplates[player.partyLeaderId];
       if (plTemplate?.effect?.triggerEvent === 'ON_MODIFIER_PLAYED') {
         phase.accumulatedModifier += amount > 0 ? 1 : -1;
       }
@@ -2921,13 +2922,13 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const template = gameState.cardTemplates[partyLeaderCard.templateId] as any;
+    const template = gameState.cardTemplates[partyLeaderCard.templateId];
     if (!template?.effect?.isOptional) {
       socket.emit('actionFailed', 'This party leader ability triggers automatically.');
       return;
     }
 
-    if (template.effect.action === 'STEAL_CARD') {
+    if (template?.effect?.action === 'STEAL_CARD') {
       const opponents = Object.entries(gameState.players).filter(
         ([id, p]) => id !== socket.id && p.zones.hand.length > 0
       );
@@ -2985,10 +2986,14 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const monsterTemplate = gameState.cardTemplates[monster.templateId] as any;
+    const monsterTemplate = gameState.cardTemplates[monster.templateId];
     const reqCheck = checkMonsterRequirements(gameState, player, monsterTemplate);
     if (!reqCheck.met) {
       socket.emit('actionFailed', `Requirements not met: ${reqCheck.missing}`);
+      return;
+    }
+    if (!monsterTemplate) {
+      socket.emit('actionFailed', 'Monster template not found.');
       return;
     }
 
@@ -3043,9 +3048,9 @@ io.on('connection', (socket: Socket) => {
     if (equippedItemId) {
       const itemInstance = player.zones.party.find(c => c.instanceId === equippedItemId);
       if (itemInstance) {
-        const itemTemplate = gameState.cardTemplates[itemInstance.templateId] as any;
+        const itemTemplate = gameState.cardTemplates[itemInstance.templateId];
 
-        const passives = itemTemplate?.passiveModifiers as Array<{stat: string; value?: any}> | undefined;
+        const passives = itemTemplate?.passiveModifiers;
         if (passives?.some(p => p.stat === 'heroEffectLocked')) {
           if (!playedFromAbility) player.actionPoints = (player.actionPoints ?? 0) + 1;
           socket.emit('actionFailed', 'This hero\'s effect is locked by an equipped item.');
@@ -3053,18 +3058,18 @@ io.on('connection', (socket: Socket) => {
           return;
         }
 
-        const itemTrigger = itemTemplate?.trigger as { event: string; scope: string; optional?: boolean; effects: any[]; cost?: any[] } | undefined;
+        const itemTrigger = itemTemplate?.trigger;
         if (itemTrigger?.event === 'ON_HERO_ROLL_ATTEMPT' && itemTrigger.scope === 'equipped_hero') {
-          const modifyEffect = (itemTrigger.effects ?? []).find((e: any) => e.action === 'MODIFY_ROLL') as { action: string; amount: number } | undefined;
+          const modifyEffect = itemTrigger.effects.find(e => e.action === 'MODIFY_ROLL');
           if (modifyEffect) {
             if (!itemTrigger.optional) {
-              preRollBonus += modifyEffect.amount;
+              preRollBonus += modifyEffect.amount ?? 0;
             } else {
-              const maxDiscard = (itemTrigger.cost?.[0] as any)?.max ?? 3;
+              const maxDiscard = itemTrigger.cost?.[0]?.max ?? 3;
               const availableCount = Math.min(maxDiscard, player.zones.hand.length);
               const countOptions: AbilityPromptOption[] = [];
               for (let n = 0; n <= availableCount; n++) {
-                const bonus = n * modifyEffect.amount;
+                const bonus = n * (modifyEffect.amount ?? 0);
                 countOptions.push({
                   id: String(n),
                   label: n === 0 ? 'Skip (no bonus)' : `Discard ${n} card${n > 1 ? 's' : ''} (+${bonus} bonus)`,
@@ -3077,9 +3082,9 @@ io.on('connection', (socket: Socket) => {
                 heroInstanceId: hero.instanceId,
                 sourcePlayerId: socket.id,
                 promptType: 'confirm',
-                message: `${itemTemplate.name}: Discard cards for a roll bonus?`,
+                message: `${itemTemplate?.name ?? itemInstance.templateId}: Discard cards for a roll bonus?`,
                 options: countOptions,
-                effect: { action: 'ITEM_I004_SELECT_COUNT', bonusPerCard: modifyEffect.amount },
+                effect: { action: 'ITEM_I004_SELECT_COUNT', bonusPerCard: modifyEffect.amount ?? 0 },
                 remainingEffects: [],
                 isItemTrigger: true,
                 itemInstanceId: itemInstance.instanceId,
@@ -3230,8 +3235,8 @@ io.on('connection', (socket: Socket) => {
     if (nextPlayer) {
       nextPlayer.actionPoints = 3;
       for (const slainMonster of nextPlayer.slainMonsters ?? []) {
-        const mt = gameState.cardTemplates[slainMonster.templateId] as any;
-        if (mt?.slainEffect?.action === 'EXTRA_AP') nextPlayer.actionPoints += (mt.slainEffect.amount as number) ?? 0;
+        const mt = gameState.cardTemplates[slainMonster.templateId];
+        if (mt?.slainEffect?.action === 'EXTRA_AP') nextPlayer.actionPoints += mt.slainEffect.amount ?? 0;
       }
       // Reset ability usage flags for new active player
       nextPlayer.zones.party.forEach((card) => {
@@ -3243,7 +3248,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     heroesPlayedFromAbilityThisTurn.delete(socket.data.roomCode as string);
-    delete (gameState as any).roomFlags;
+    delete gameState.roomFlags;
 
     sendRoomUpdate();
   });
@@ -3313,9 +3318,9 @@ io.on('connection', (socket: Socket) => {
     gameState.discardPile = [];
     gameState.diceRolls = {};
     pendingChallenges.delete(socket.data.roomCode as string);
-    delete (gameState as any).pendingChallenge;
+    delete gameState.pendingChallenge;
     modifierPhases.delete(socket.data.roomCode as string);
-    delete (gameState as any).modifierPhase;
+    delete gameState.modifierPhase;
     gameState.currentRollerId = undefined;
     gameState.firstPlayerId = undefined;
     gameState.rollWinnerId = undefined;
@@ -3377,16 +3382,16 @@ io.on('connection', (socket: Socket) => {
       if (disconnectPending.pendingPlayerId === socket.id) {
         gameState.discardPile.push(disconnectPending.pendingCardInstance);
         pendingChallenges.delete(roomCode);
-        delete (gameState as any).pendingChallenge;
+        delete gameState.pendingChallenge;
       } else if (disconnectPending.eligibleChallengerIds.includes(socket.id)) {
         disconnectPending.passedPlayerIds.add(socket.id);
         const remaining = disconnectPending.eligibleChallengerIds.filter(id => !disconnectPending.passedPlayerIds.has(id));
         if (remaining.length === 0 && !disconnectPending.challengerId) {
           executePendingCardPlay(roomCode, disconnectPending, gameState);
           pendingChallenges.delete(roomCode);
-          delete (gameState as any).pendingChallenge;
+          delete gameState.pendingChallenge;
         } else {
-          const gsPending = (gameState as any).pendingChallenge;
+          const gsPending = gameState.pendingChallenge;
           if (gsPending) gsPending.eligibleChallengerIds = remaining;
         }
       }
@@ -3396,7 +3401,7 @@ io.on('connection', (socket: Socket) => {
     if (modPhase) {
       if (modPhase.rollingPlayerId === socket.id) {
         modifierPhases.delete(roomCode);
-        delete (gameState as any).modifierPhase;
+        delete gameState.modifierPhase;
       } else if (modPhase.allOpponentsWithModifiers.includes(socket.id)) {
         modPhase.allOpponentsWithModifiers = modPhase.allOpponentsWithModifiers.filter(id => id !== socket.id);
         modPhase.opponentQueue = modPhase.opponentQueue.filter(id => id !== socket.id);

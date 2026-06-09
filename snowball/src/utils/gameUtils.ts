@@ -21,7 +21,7 @@ export const findCardInstanceById = (gameState?: GameState, instanceId?: string 
     }
     // search active monsters
     const foundMon = gameState.activeMonsters.find((m) => m.instanceId === instanceId);
-    if (foundMon) return foundMon as any;
+    if (foundMon) return foundMon;
     // search decks
     const foundMain = gameState.mainDeck.find((c) => c.instanceId === instanceId);
     if (foundMain) return foundMain;

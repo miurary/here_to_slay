@@ -13,7 +13,7 @@ export default function PartyLeaderCard({ gameState, myId, isMyTurn, onUsePartyL
     const partyLeaderCard = player?.zones.party.find(c => c.cardType === 'party_leader');
     if (!partyLeaderCard) return null;
 
-    const template = gameState.cardTemplates[partyLeaderCard.templateId] as any;
+    const template = gameState.cardTemplates[partyLeaderCard.templateId];
     const cardName = template?.name || partyLeaderCard.templateId;
     const abilityText = (template?.abilityText as string) || '';
     const isOptional = template?.effect?.isOptional === true;
