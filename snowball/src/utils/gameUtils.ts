@@ -14,14 +14,14 @@ export const findCardInstanceById = (gameState?: GameState, instanceId?: string 
     if (!instanceId || !gameState) return undefined;
     // search players' zones
     for (const p of Object.values(gameState.players)) {
-        for (const zone of ['hand', 'party', 'discardPile'] as const) {
+        for (const zone of ['hand', 'party'] as const) {
         const found = p.zones[zone].find((c) => c.instanceId === instanceId);
         if (found) return found;
         }
     }
     // search active monsters
     const foundMon = gameState.activeMonsters.find((m) => m.instanceId === instanceId);
-    if (foundMon) return foundMon as any;
+    if (foundMon) return foundMon;
     // search decks
     const foundMain = gameState.mainDeck.find((c) => c.instanceId === instanceId);
     if (foundMain) return foundMain;

@@ -37,7 +37,7 @@ export default function Home() {
     setStatus('Creating room...');
 
     try {
-      const response = await fetch('http://localhost:3001/api/create-room', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/create-room`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -51,7 +51,7 @@ export default function Home() {
       }
 
       navigate(`/game/${data.roomCode}`);
-    } catch (error) {
+    } catch {
       setStatus('Unable to connect to the game server.');
     }
   };
@@ -89,21 +89,7 @@ export default function Home() {
 
           <CreateNewRoomCard handleCreateRoom={handleCreateRoom} />
 
-          <div className="panel">
-            <h2>Join an existing room</h2>
-            <form onSubmit={handleJoinRoom}>
-              <input
-                type="text"
-                value={roomCode}
-                onChange={(event) => setRoomCode(event.target.value)}
-                placeholder="Room Code"
-                style={{ width: '100%', maxWidth: '240px', padding: '0.75rem', marginBottom: '0.75rem' }}
-              />
-              <button type="submit" className="primaryButton">
-                Join Room
-              </button>
-            </form>
-          </div>
+          <JoinExistingRoomCard roomCode={roomCode} setRoomCode={setRoomCode} handleJoinRoom={handleJoinRoom}/>
 
           {status && (
             <div style={{ marginTop: '1rem', color: '#333' }}>

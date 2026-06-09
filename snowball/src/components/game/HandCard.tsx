@@ -1,18 +1,20 @@
 import type { CardInstance, GameState } from '../../../../shared/types';
 import { getCardTypeLabel } from '../../utils/gameUtils';
+import type { Dispatch, SetStateAction } from 'react';
 
 interface HandCardProps {
     gameState: GameState;
     myId: string;
     selectedHeroId: string | null;
-    setSelectedHeroId: (id: string | null) => void;
-    setViewedItemId: (id: string | null) => void;
-    setSelectedHeroLocation: (location: 'party' | 'hand') => void;
-    setHeroRollResult: (result: string | null) => void;
+    setSelectedHeroId: Dispatch<SetStateAction<string | null>>;
+    setViewedItemId: Dispatch<SetStateAction<string | null>>;
+    setSelectedHeroLocation: Dispatch<SetStateAction<'hand' | 'party' | null>>;
+    setHeroRollResult: Dispatch<SetStateAction<string | null>>;
     handlePlayHero: (instanceId: string) => void;
+    handlePlayMagic: (instanceId: string) => void;
     handleInitiateCursedItemPlay: (instanceId: string) => void;
-    setPendingItemPlayId: (instanceId: string | null) => void;
-    setItemPlayPromptOpen: (open: boolean) => void;
+    setPendingItemPlayId: Dispatch<SetStateAction<string | null>>;
+    setItemPlayPromptOpen: Dispatch<SetStateAction<boolean>>;
     pendingHeroPlayId: string | null;
     selectedHero: CardInstance | undefined;
     selectedHeroLocation: 'party' | 'hand' | null;
@@ -23,7 +25,10 @@ interface HandCardProps {
     handlePlayHeroRoll: () => void;
     handleSkipPlayHeroRoll: () => void;
     handleRollHeroAbility: () => void;
+    handleActivateHeroAbility: (heroInstanceId: string) => void;
+    pendingHeroAbilityActivationId: string | null;
     playHeroRollResult: string | null;
+    isMyTurn: boolean;
 }
 
 export default function HandCard({ 
@@ -35,6 +40,7 @@ export default function HandCard({
     setSelectedHeroLocation, 
     setHeroRollResult,
     handlePlayHero,
+    handlePlayMagic,
     handleInitiateCursedItemPlay,
     setPendingItemPlayId,
     setItemPlayPromptOpen,
@@ -48,8 +54,12 @@ export default function HandCard({
     handlePlayHeroRoll,
     handleSkipPlayHeroRoll,
     handleRollHeroAbility,
-    playHeroRollResult
+    handleActivateHeroAbility,
+    pendingHeroAbilityActivationId,
+    playHeroRollResult,
+    isMyTurn,
 }: HandCardProps) {
+
     return (
         <div className="panel panelHand">
             <h3>Your Hand ({gameState.players[myId].zones.hand.length} cards)</h3>
@@ -65,6 +75,7 @@ export default function HandCard({
                     key={card.instanceId}
                     onClick={(event) => {
                         event.stopPropagation();
+                        if (!isMyTurn) return;
                         if (card.cardType === 'hero') {
                         setSelectedHeroId(card.instanceId);
                         setSelectedHeroLocation('hand');
@@ -107,6 +118,7 @@ export default function HandCard({
                         type="button"
                         onClick={(event) => {
                             event.stopPropagation();
+                            if (!isMyTurn) return;
                             const isCursed = (template?.subtype as string | undefined)?.toLowerCase() === 'cursed';
                             if (isCursed) {
                             handleInitiateCursedItemPlay(card.instanceId);
@@ -116,10 +128,35 @@ export default function HandCard({
                             setViewedItemId(null);
                             }
                         }}
-                        style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                        disabled={!isMyTurn}
+                        style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: !isMyTurn ? '#999' : '#007bff', color: 'white', border: 'none', borderRadius: '6px', cursor: !isMyTurn ? 'not-allowed' : 'pointer' }}
                         >
                         Use Item
                         </button>
+                    )}
+                    {card.cardType === 'magic' && (
+                        <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            if (!isMyTurn) return;
+                            handlePlayMagic(card.instanceId);
+                        }}
+                        disabled={!isMyTurn}
+                        style={{ marginTop: '0.75rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem', backgroundColor: !isMyTurn ? '#999' : '#8e44ad', color: 'white', border: 'none', borderRadius: '6px', cursor: !isMyTurn ? 'not-allowed' : 'pointer' }}
+                        >
+                        Play Magic
+                        </button>
+                    )}
+                    {card.cardType === 'challenge' && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: '#fff3cd', color: '#856404', border: '1px solid #ffc107', borderRadius: '6px', display: 'inline-block' }}>
+                        Reactive — plays during opponent's turn
+                        </div>
+                    )}
+                    {card.cardType === 'modifier' && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.3rem 0.6rem', fontSize: '0.75rem', backgroundColor: '#e8f4fd', color: '#0c5460', border: '1px solid #bee5eb', borderRadius: '6px', display: 'inline-block' }}>
+                        Reactive — plays after any roll
+                        </div>
                     )}
                     {abilityText && (
                         <div style={{ fontSize: '0.65rem', color: '#333', marginTop: '0.5rem', fontStyle: 'italic', lineHeight: '1.3' }}>
@@ -145,17 +182,18 @@ export default function HandCard({
                         type="button"
                         onClick={(event) => {
                         event.stopPropagation();
+                        if (!isMyTurn) return;
                         handlePlayHero(selectedHero.instanceId);
                         }}
-                        disabled={selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId)}
+                        disabled={!isMyTurn || selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId)}
                         style={{
                         padding: '0.75rem 1.25rem',
                         fontSize: '1rem',
-                        backgroundColor: selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? '#ccc' : '#007bff',
+                        backgroundColor: !isMyTurn || selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? '#ccc' : '#007bff',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
-                        cursor: selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? 'not-allowed' : 'pointer',
+                        cursor: !isMyTurn || selectedHeroAP < 1 || (playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId) ? 'not-allowed' : 'pointer',
                         }}
                     >
                         {playHeroPromptOpen && pendingHeroPlayId === selectedHero.instanceId ? 'Waiting for roll decision…' : 'Play Hero (-1 AP)'}
@@ -178,10 +216,11 @@ export default function HandCard({
                                 type="button"
                                 onClick={(event) => {
                                 event.stopPropagation();
+                                if (!isMyTurn) return;
                                 handlePlayHeroRoll();
                                 }}
-                                disabled={isHeroRolling}
-                                style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
+                                disabled={!isMyTurn || isHeroRolling}
+                                style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: !isMyTurn || isHeroRolling ? '#ccc' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: !isMyTurn || isHeroRolling ? 'not-allowed' : 'pointer' }}
                             >
                                 Roll Ability
                             </button>
@@ -189,10 +228,11 @@ export default function HandCard({
                                 type="button"
                                 onClick={(event) => {
                                 event.stopPropagation();
+                                if (!isMyTurn) return;
                                 handleSkipPlayHeroRoll();
                                 }}
-                                disabled={isHeroRolling}
-                                style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: isHeroRolling ? '#ccc' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: isHeroRolling ? 'not-allowed' : 'pointer' }}
+                                disabled={!isMyTurn || isHeroRolling}
+                                style={{ padding: '0.75rem 1.25rem', fontSize: '1rem', backgroundColor: !isMyTurn || isHeroRolling ? '#ccc' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: !isMyTurn || isHeroRolling ? 'not-allowed' : 'pointer' }}
                             >
                                 Don't Roll
                             </button>
@@ -208,6 +248,18 @@ export default function HandCard({
                             {playHeroRollResult}
                             </div>
                         )}
+                        {pendingHeroAbilityActivationId === selectedHero.instanceId && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleActivateHeroAbility(selectedHero.instanceId);
+                              }}
+                              style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', fontSize: '1rem', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                            >
+                              Activate Ability
+                            </button>
+                        )}
                         </div>
                     )}
                     </>
@@ -217,24 +269,40 @@ export default function HandCard({
                         type="button"
                         onClick={(event) => {
                         event.stopPropagation();
+                        if (!isMyTurn || selectedHero.effectUsedThisTurn) return;
                         handleRollHeroAbility();
                         }}
+                        disabled={!isMyTurn || selectedHero.effectUsedThisTurn}
                         style={{
                         padding: '0.75rem 1.25rem',
                         fontSize: '1rem',
-                        backgroundColor: '#007bff',
+                        backgroundColor: !isMyTurn || selectedHero.effectUsedThisTurn ? '#999' : '#007bff',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
-                        cursor: 'pointer',
+                        cursor: !isMyTurn || selectedHero.effectUsedThisTurn ? 'not-allowed' : 'pointer',
                         }}
                     >
-                        Roll for Hero Ability
+                        {selectedHero.effectUsedThisTurn ? 'Ability Used This Turn' : 'Roll for Hero Ability'}
                     </button>
                     {heroRollResult && (
                         <div style={{ marginTop: '0.75rem', color: '#333' }}>
                         {heroRollResult}
                         </div>
+                    )}
+                    {pendingHeroAbilityActivationId === selectedHero.instanceId && (
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (!isMyTurn) return;
+                                handleActivateHeroAbility(selectedHero.instanceId);
+                            }}
+                            disabled={!isMyTurn}
+                            style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', fontSize: '1rem', backgroundColor: !isMyTurn ? '#999' : '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: !isMyTurn ? 'not-allowed' : 'pointer' }}
+                        >
+                            Activate Ability
+                        </button>
                     )}
                     </>
                 ) : null}

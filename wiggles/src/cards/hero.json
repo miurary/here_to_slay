@@ -37,8 +37,7 @@
                 {
                     "type": "DISCARD",
                     "cardType": "modifier",
-                    "amount": 1,
-                    "targetZone": "hand"
+                    "amount": 1
                 }
             ],
             "effects": [
@@ -60,18 +59,13 @@
         "rollToPlay": 12,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "zone": "monsters",
-                "cardType": "monster"
-            },
             "effects": [
                 {
                     "action": "SLAY",
                     "target": "selected"
                 },
                 {
-                    "action": "FORCE_END_TURN",
-                    "target": "game"
+                    "action": "FORCE_END_TURN"
                 }
             ]
         }
@@ -311,7 +305,7 @@
     },
     "h_014": {
         "id": "h_014",
-        "name": "Fuzzy Cheeks",
+        "name": "Dumbo",
         "class": "bard",
         "abilityText": "DRAW 2 cards.",
         "type": "hero",
