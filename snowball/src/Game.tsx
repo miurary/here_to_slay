@@ -76,6 +76,7 @@ export default function Game() {
     if (!roomCode) return;
 
     const client = io(`${import.meta.env.VITE_API_URL}`, {
+      withCredentials: true,
       auth: {
         roomCode,
         username: name || undefined,

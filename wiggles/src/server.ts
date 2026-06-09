@@ -2196,7 +2196,7 @@ const handlePromptResponse = (
 };
 
 const app = express();
-app.use(cors());
+app.use(cors({origin: process.env.CORS_ORIGIN, credentials: true}));
 app.use(express.json());
 
 const rooms: Record<string, GameState> = {};
@@ -2249,13 +2249,14 @@ app.get('/api/room/:roomCode', (req, res) => {
 });
 
 const httpServer = createServer(app);
-const API_URL = process.env.API_URL || 'http://localhost:5173';
+const API_URL = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 // Apply the types to the Socket Server
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
     origin: API_URL,
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -3446,6 +3447,7 @@ io.on('connection', (socket: Socket) => {
     sendRoomUpdate();
   });
 });
+
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
