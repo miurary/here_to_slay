@@ -1,5 +1,6 @@
 import type { GameState } from '../../../../shared/types';
 import { getTemplateForInstanceId } from '../../utils/gameUtils';
+import CardArt from '../CardArt';
 
 interface PartyCardProps {
     gameState: GameState;
@@ -27,7 +28,7 @@ export default function PartyCard({
     return (
         <div className="panel panelParty">
             <h3 style={{ marginTop: 0 }}>Your Party</h3>
-            <div style={{ minHeight: '120px', display: 'grid', gap: '0.75rem' }}>
+            <div className="partyGrid">
                 {gameState.players[myId].zones.party.filter((card) => card.cardType === 'hero').length > 0 ? (
                 gameState.players[myId].zones.party
                     .filter((card) => card.cardType === 'hero')
@@ -48,6 +49,7 @@ export default function PartyCard({
                         className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
                         style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff', cursor: isMyTurn ? 'pointer' : 'not-allowed' }}
                         >
+                        <CardArt cardId={card.templateId} name={template?.name || card.templateId} style={{ marginBottom: '0.4rem' }} />
                         <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
                         <div style={{ fontSize: '0.8rem', color: '#666' }}>{template?.class || 'Hero'}</div>
                         {rollToPlay !== undefined && (
@@ -76,7 +78,7 @@ export default function PartyCard({
                     );
                     })
                 ) : (
-                <div style={{ color: '#666' }}>Play hero cards from your hand to your party.</div>
+                <div style={{ color: '#666', gridColumn: '1 / -1', textAlign: 'center', padding: '1.5rem 0' }}>Play hero cards from your hand to your party.</div>
                 )}
             </div>
         </div>

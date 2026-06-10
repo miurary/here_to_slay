@@ -14,8 +14,8 @@ interface MainDeckCardProps {
 
 export default function MainDeckCard({ gameState, myId, showDrawPrompt, actionMessage, justDrew, setActionMessage, setShowDrawPrompt, handleDrawFromMain, handleMulligan }: MainDeckCardProps) {
     return (
-        <div style={{ marginBottom: '1rem' }}>
-            <h3>Main Deck</h3>
+        <div style={{ margin: 0 }}>
+            <h3 style={{ marginBottom: '0.5rem' }}>Main Deck</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div
                 onClick={() => {

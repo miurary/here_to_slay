@@ -9,17 +9,17 @@ interface PartyLeaderReviewCardProps {
 
 export default function PartyLeaderReviewCard({ gameState, myId, handleContinue }: PartyLeaderReviewCardProps) {
     return (
-        <div className="panel panelAccentGreen">
-            <h2>Party Leader Review</h2>
-            <p style={{ fontSize: '1rem', marginBottom: '1rem' }}>
+        <div className="panel panelAccentGreen" style={{ width: '100%', boxSizing: 'border-box' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Party Leader Review</h2>
+            <p style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>
                 All players have chosen their party leaders. Review the choices below before continuing into the game.
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', overflowX: 'auto', paddingBottom: '0.25rem', marginBottom: '1rem' }}>
                 {Object.values(gameState.players).map((player) => {
                 const chosen = player.zones.party[0];
                 const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
                 return (
-                    <div key={player.id} style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
+                    <div key={player.id} style={{ flex: '1 1 0', minWidth: '160px', padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{player.username || 'Player'}</div>
                     {chosen ? (
                         <>
@@ -34,9 +34,9 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue 
                 );
                 })}
             </div>
-            <div style={{ marginBottom: '1.5rem' }}>
-                <h3>Revealed Monsters</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
+            <div style={{ marginBottom: '1rem' }}>
+                <h3 style={{ marginBottom: '0.5rem' }}>Revealed Monsters</h3>
+                <div style={{ display: 'flex', gap: '0.75rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
                 {gameState.activeMonsters.map((monster) => {
                     const template = gameState.cardTemplates[monster.templateId];
                     const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
@@ -50,7 +50,7 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue 
                     const slainEffectText = template?.slainEffectText as string | undefined;
 
                     return (
-                    <div key={monster.instanceId} style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
+                    <div key={monster.instanceId} style={{ flex: '1 1 0', minWidth: '220px', padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
                         <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{template?.name || monster.templateId}</div>
                         <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.75rem' }}>{requirementText}</div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>

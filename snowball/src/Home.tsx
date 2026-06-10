@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import UsernameCard from './components/home/UsernameCard';
 import CreateNewRoomCard from './components/home/CreateNewRoomCard';
 import JoinExistingRoomCard from './components/home/JoinExistingRoomCard';
@@ -7,11 +7,12 @@ import './App.css';
 
 export default function Home() {
   const navigate = useNavigate();
+  const location = useLocation();
   const storedName = localStorage.getItem('username') ?? '';
   const [name, setName] = useState(storedName);
   const [nameSaved, setNameSaved] = useState(Boolean(storedName));
   const [roomCode, setRoomCode] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState<string>((location.state as { error?: string } | null)?.error ?? '');
 
   const handleSaveName = () => {
     const trimmed = name.trim();

@@ -1,6 +1,7 @@
 import type { CardInstance, GameState } from '../../../../shared/types';
 import { getCardTypeLabel } from '../../utils/gameUtils';
 import type { Dispatch, SetStateAction } from 'react';
+import CardArt from '../CardArt';
 
 interface HandCardProps {
     gameState: GameState;
@@ -95,6 +96,7 @@ export default function HandCard({
                     }}
                     className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
                     >
+                    <CardArt cardId={card.templateId} name={cardName} style={{ marginBottom: '0.4rem' }} />
                     <div style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{cardName}</div>
                     <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.25rem' }}>
                         {getCardTypeLabel(card, template)}

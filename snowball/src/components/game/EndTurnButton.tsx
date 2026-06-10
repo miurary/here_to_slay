@@ -7,17 +7,14 @@ interface EndTurnButtonProps {
 }
 
 export default function EndTurnButton({gameState, myId, handleEndTurn}: EndTurnButtonProps) {
+    if (gameState.activePlayerId !== myId) return null;
     return (
-        <div style={{ marginBottom: '1rem' }}>
-            {gameState.activePlayerId === myId && (
-            <button
-                type="button"
-                onClick={handleEndTurn}
-                style={{ padding: '0.5rem 1rem', fontSize: '1rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}
-            >
-                End Turn
-            </button>
-            )}
-        </div>
+        <button
+            type="button"
+            onClick={handleEndTurn}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '0.75rem 1rem', fontSize: '1rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+        >
+            End Turn
+        </button>
     );
 }

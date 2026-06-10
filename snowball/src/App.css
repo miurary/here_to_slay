@@ -60,9 +60,12 @@ body {
 }
 
 .panelParty {
-  width: 260px;
+  width: 100%;
+  height: 100%;
   padding: 20px;
   border-color: #d1d5db;
+  box-sizing: border-box;
+  overflow: auto;
 }
 
 .boardTopRow {
@@ -170,4 +173,164 @@ p {
 input,
 button {
   font: inherit;
+}
+
+/* ===== Full-screen, no-scroll game layout ===== */
+.gameShell {
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  background: #eef2f6;
+  text-align: left;
+}
+
+.gameGrid {
+  height: 100%;
+  width: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+/* Row 1 — header: room code + username + back */
+.gameHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.gameHeader h1 {
+  font-size: 1.35rem;
+  margin: 0;
+}
+.gameHeaderLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gameHeaderLeft p {
+  font-size: 0.8rem;
+  color: #475569;
+}
+.gameHeaderUsername {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.usernameInput {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.95rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  width: 200px;
+  box-sizing: border-box;
+}
+.gameHeaderBack {
+  margin-left: auto;
+}
+
+/* Row 2 — centered status / info panel */
+.gameStatusRow {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 0;
+}
+
+/* Row 3 — board: party leader | party | active monsters */
+.gameBoard {
+  display: grid;
+  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr) minmax(280px, 340px);
+  gap: 12px;
+  min-height: 0;
+}
+.boardLeft,
+.boardCenter,
+.boardRight {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.boardCenter {
+  min-width: 0;
+}
+/* Pre-game states (waiting/rolling/etc.) render centered here */
+.gameBoardPre {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: auto;
+  min-height: 0;
+}
+.boardPreInner {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Row 4 — footer: deck/discard | hand button | opponents */
+.gameFooter {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  max-height: 230px;
+  min-height: 0;
+}
+.footerLeft {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  overflow: auto;
+}
+.footerHand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  align-items: stretch;
+}
+.footerOpponents {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.handButton {
+  padding: 18px 22px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  background: #2563eb;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+  white-space: nowrap;
+}
+.handButton:hover {
+  background: #1d4ed8;
+}
+
+.bannerError {
+  padding: 0.4rem 0.9rem;
+  border-radius: 8px;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+/* Party grid — fill the center, flow into multiple columns */
+.partyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  align-content: start;
 }
