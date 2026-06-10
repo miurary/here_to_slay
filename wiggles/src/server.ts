@@ -81,7 +81,7 @@ const loadAllCardTemplates = (): Record<string, CardTemplate> => {
   return templates;
 };
 
-type AbilityPromptType = 'selectPlayer' | 'selectCard' | 'discardCard' | 'confirm';
+type AbilityPromptType = 'selectPlayer' | 'selectCard' | 'discardCard' | 'confirm' | 'multiSelectCard';
 
 interface AbilityPromptOption {
   id: string;
@@ -109,6 +109,9 @@ interface AbilityPromptRequest {
   isChallengePrompt?: boolean;
   isMonsterEffect?: boolean;
   isPartyLeaderAbility?: boolean;
+  isSlainPassive?: boolean;
+  minSelections?: number;
+  maxSelections?: number;
 }
 
 const abilityPromptRequests = new Map<string, AbilityPromptRequest>();
@@ -163,6 +166,8 @@ const emitAbilityPrompt = (playerId: string, prompt: AbilityPromptRequest) => {
     message: prompt.message,
     options: prompt.options,
     requesterId: prompt.sourcePlayerId,
+    ...(prompt.minSelections !== undefined ? { minSelections: prompt.minSelections } : {}),
+    ...(prompt.maxSelections !== undefined ? { maxSelections: prompt.maxSelections } : {}),
   });
 };
 
@@ -171,6 +176,95 @@ const emitAbilityResolution = (socket: Socket<ClientToServerEvents, ServerToClie
 };
 
 const buildPromptId = () => randomUUID();
+
+// ── Slain-monster reactive passives ──────────────────────────────────────────
+// Monsters a player has slain can grant ongoing abilities that react to later
+// events (e.g. "each time you SACRIFICE a card..."). Call this at the point an
+// `event` happens, passing the player it happened to; if that player has slain a
+// monster whose slainEffect triggers on the event, the appropriate optional
+// prompt is emitted to them. Resolution happens in handlePromptResponse
+// (request.isSlainPassive).
+const triggerSlainMonsterPassive = (
+  gameState: GameState,
+  ownerPlayerId: string,
+  event: string,
+) => {
+  const player = gameState.players[ownerPlayerId];
+  if (!player) return;
+  const targetSocket = getSocketByPlayerId(ownerPlayerId);
+  if (!targetSocket) return;
+  const roomCode = targetSocket.data.roomCode as string;
+
+  for (const monster of player.slainMonsters ?? []) {
+    const slain = gameState.cardTemplates[monster.templateId]?.slainEffect;
+    if (!slain || slain.triggerEvent !== event) continue;
+    const monsterName = gameState.cardTemplates[monster.templateId]?.name ?? 'A slain monster';
+
+    // m_001 Doombringer — ON_SACRIFICE: choose a card from discard → hand.
+    if (event === 'ON_SACRIFICE' && slain.action === 'PROMPT_SELECT') {
+      if (gameState.discardPile.length === 0) return;
+      const options: AbilityPromptOption[] = gameState.discardPile.map((c) => ({
+        id: c.instanceId,
+        label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+        payload: { cardInstanceId: c.instanceId },
+      }));
+      options.push({ id: 'skip', label: 'Skip (take nothing)' });
+      emitAbilityPrompt(ownerPlayerId, {
+        promptId: buildPromptId(),
+        roomCode,
+        heroInstanceId: '',
+        sourcePlayerId: ownerPlayerId,
+        promptType: 'selectCard',
+        message: `${monsterName}: choose a card from the discard pile to add to your hand.`,
+        options,
+        effect: { action: 'SLAIN_PICK_FROM_DISCARD' },
+        remainingEffects: [],
+        isSlainPassive: true,
+      });
+      return;
+    }
+
+    // m_005 Rex Major — ON_DRAW_MODIFIER: optionally draw a second card.
+    if (event === 'ON_DRAW_MODIFIER' && slain.action === 'DRAW_CARD') {
+      if (gameState.mainDeck.length === 0) return;
+      emitAbilityPrompt(ownerPlayerId, {
+        promptId: buildPromptId(),
+        roomCode,
+        heroInstanceId: '',
+        sourcePlayerId: ownerPlayerId,
+        promptType: 'confirm',
+        message: `${monsterName}: you drew a Modifier — draw a second card?`,
+        options: [
+          { id: 'yes', label: 'Draw a card' },
+          { id: 'no', label: 'No thanks' },
+        ],
+        effect: { action: 'SLAIN_DRAW_EXTRA' },
+        remainingEffects: [],
+        isSlainPassive: true,
+      });
+      return;
+    }
+  }
+};
+
+// Draws `count` cards from the main deck into the player's hand and fires the
+// ON_DRAW_MODIFIER slain-monster passive (m_005) for each Modifier drawn. Use
+// this for every gameplay draw so the passive fires consistently. The passive's
+// own bonus draw intentionally does NOT route through here, to avoid chaining.
+const drawCardsForPlayer = (
+  gameState: GameState,
+  player: Player,
+  count: number,
+): CardInstance[] => {
+  const drawn = drawCards(gameState.mainDeck, count);
+  player.zones.hand.push(...drawn);
+  for (const card of drawn) {
+    if (card.cardType === 'modifier') {
+      triggerSlainMonsterPassive(gameState, player.id, 'ON_DRAW_MODIFIER');
+    }
+  }
+  return drawn;
+};
 
 const moveCardBetweenZones = (
   sourceZone: CardInstance[],
@@ -335,8 +429,7 @@ const processHeroAbilityEffects = (
       case 'DRAW': {
         if (responsePayload?.cardInstanceId) break; // skip re-execution when responding to a later prompt
         const amount = effect.amount ?? 1;
-        const cards = drawCards(gameState.mainDeck, amount);
-        player.zones.hand.push(...cards);
+        const cards = drawCardsForPlayer(gameState, player, amount);
         effectResult = `Drew ${cards.length} card${cards.length === 1 ? '' : 's'} from the main deck.`;
         break;
       }
@@ -509,6 +602,7 @@ const processHeroAbilityEffects = (
           const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
           if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
           gameState.discardPile.push(sacrificedCard);
+          triggerSlainMonsterPassive(gameState, player.id, 'ON_SACRIFICE');
           const sacrificedName = gameState.cardTemplates[sacrificedCard.templateId]?.name || sacrificedCard.templateId;
           let psMsg = `Sacrificed ${sacrificedName}.`;
           if (sacrificedCard.cardType === 'hero' && sacrificedCard.equippedItem) {
@@ -701,6 +795,7 @@ const processHeroAbilityEffects = (
         const [sacrificedCard] = player.zones.party.splice(sacrificeIndex, 1);
         if (!sacrificedCard) { effectResult = 'Failed to sacrifice card.'; break; }
         gameState.discardPile.push(sacrificedCard);
+        triggerSlainMonsterPassive(gameState, player.id, 'ON_SACRIFICE');
         const sacrificedName = gameState.cardTemplates[sacrificedCard.templateId]?.name || sacrificedCard.templateId;
         let sacrificeMsg = `Sacrificed ${sacrificedName}.`;
         if (sacrificedCard.cardType === 'hero' && sacrificedCard.equippedItem) {
@@ -1064,7 +1159,7 @@ const applyMonsterAttackEffects = (
           if (player.partyLeaderId) {
             const plTemplate = gameState.cardTemplates[player.partyLeaderId];
             if (plTemplate?.effect?.triggerEvent === 'ON_SLAY' && plTemplate.effect.action === 'DRAW') {
-              player.zones.hand.push(...drawCards(gameState.mainDeck, plTemplate.effect.amount ?? 1));
+              drawCardsForPlayer(gameState, player, plTemplate.effect.amount ?? 1);
             }
           }
           if (gameState.monsterDeck.length > 0) {
@@ -1075,7 +1170,7 @@ const applyMonsterAttackEffects = (
         }
       }
     } else if (effect.action === 'DRAW') {
-      player.zones.hand.push(...drawCards(gameState.mainDeck, effect.amount ?? 1));
+      drawCardsForPlayer(gameState, player, effect.amount ?? 1);
     } else if (effect.action === 'DISCARD') {
       const amount = effect.amount ?? 0;
       if (amount < 0 || player.zones.hand.length <= amount) {
@@ -1646,7 +1741,7 @@ const processMagicCardSteps = (
   if (player.partyLeaderId) {
     const plTemplate = gameState.cardTemplates[player.partyLeaderId];
     if (plTemplate?.effect?.triggerEvent === 'ON_DRAW_MAGIC' && plTemplate.effect.action === 'DRAW') {
-      player.zones.hand.push(...drawCards(gameState.mainDeck, 1));
+      drawCardsForPlayer(gameState, player, 1);
     }
   }
 
@@ -1659,8 +1754,7 @@ const processMagicCardSteps = (
 
     switch (step.action) {
       case 'DRAW': {
-        const drawn = drawCards(gameState.mainDeck, step.amount ?? 1);
-        player.zones.hand.push(...drawn);
+        const drawn = drawCardsForPlayer(gameState, player, step.amount ?? 1);
         stepResult = `Drew ${drawn.length} card${drawn.length === 1 ? '' : 's'}.`;
         break;
       }
@@ -1869,72 +1963,8 @@ const handleItemTriggerResponse = (
   sendRoomUpdate: () => void
 ) => {
   switch (request.effect.action as string) {
-    case 'ITEM_I004_SELECT_COUNT': {
-      const count = (responsePayload?.count as number | undefined) ?? 0;
-      const bonusPerCard = (request.effect.bonusPerCard as number) ?? 2;
-      if (count === 0 || sourcePlayer.zones.hand.length === 0) {
-        executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, 0, sendRoomUpdate);
-        return;
-      }
-      const discardOptions = sourcePlayer.zones.hand.map(c => ({
-        id: c.instanceId,
-        label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
-        payload: { cardInstanceId: c.instanceId },
-      }));
-      emitAbilityPrompt(sourceSocket.id, {
-        promptId: buildPromptId(),
-        roomCode: sourceSocket.data.roomCode as string,
-        heroInstanceId: request.heroInstanceId,
-        sourcePlayerId: request.sourcePlayerId,
-        promptType: 'discardCard',
-        message: `Discard card 1 of ${count}.`,
-        options: discardOptions,
-        effect: { action: 'ITEM_I004_DISCARD', totalDiscards: count, discardsDone: 0, rollBonusSoFar: 0, bonusPerCard },
-        remainingEffects: [],
-        isItemTrigger: true,
-        ...(request.itemInstanceId !== undefined ? { itemInstanceId: request.itemInstanceId } : {}),
-      });
-      sendRoomUpdate();
-      return;
-    }
-    case 'ITEM_I004_DISCARD': {
-      const cardInstanceId = responsePayload?.cardInstanceId;
-      if (cardInstanceId) {
-        const idx = sourcePlayer.zones.hand.findIndex(c => c.instanceId === cardInstanceId);
-        if (idx !== -1) {
-          const [discarded] = sourcePlayer.zones.hand.splice(idx, 1);
-          if (discarded) gameState.discardPile.push(discarded);
-        }
-      }
-      const totalDiscards = request.effect.totalDiscards as number;
-      const discardsDone = (request.effect.discardsDone as number) + 1;
-      const bonusPerCard = (request.effect.bonusPerCard as number) ?? 2;
-      const rollBonusSoFar = (request.effect.rollBonusSoFar as number) + bonusPerCard;
-      if (discardsDone < totalDiscards && sourcePlayer.zones.hand.length > 0) {
-        const discardOptions = sourcePlayer.zones.hand.map(c => ({
-          id: c.instanceId,
-          label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
-          payload: { cardInstanceId: c.instanceId },
-        }));
-        emitAbilityPrompt(sourceSocket.id, {
-          promptId: buildPromptId(),
-          roomCode: sourceSocket.data.roomCode as string,
-          heroInstanceId: request.heroInstanceId,
-          sourcePlayerId: request.sourcePlayerId,
-          promptType: 'discardCard',
-          message: `Discard card ${discardsDone + 1} of ${totalDiscards}.`,
-          options: discardOptions,
-          effect: { action: 'ITEM_I004_DISCARD', totalDiscards, discardsDone, rollBonusSoFar, bonusPerCard },
-          remainingEffects: [],
-          isItemTrigger: true,
-          ...(request.itemInstanceId !== undefined ? { itemInstanceId: request.itemInstanceId } : {}),
-        });
-        sendRoomUpdate();
-        return;
-      }
-      executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, rollBonusSoFar, sendRoomUpdate);
-      return;
-    }
+    // i_004 "Biggest Ring Ever" is resolved via the multi-select prompt
+    // (see handleMultiPromptResponse), not through this single-select handler.
     case 'ITEM_GOBLET_CONFIRM': {
       if (option.id === 'use' && request.itemInstanceId) {
         const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === request.itemInstanceId);
@@ -1957,6 +1987,7 @@ const handleItemTriggerResponse = (
           const [sacrificed] = sourcePlayer.zones.party.splice(heroIdx, 1);
           if (sacrificed) {
             gameState.discardPile.push(sacrificed);
+            triggerSlainMonsterPassive(gameState, sourcePlayer.id, 'ON_SACRIFICE');
             if (sacrificed.equippedItem) {
               const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === sacrificed.equippedItem);
               if (itemIdx !== -1) {
@@ -1985,6 +2016,69 @@ const handleItemTriggerResponse = (
     default:
       sendRoomUpdate();
   }
+};
+
+// Resolves a 'multiSelectCard' prompt where the player picks 0..N options before
+// confirming. Currently used by i_004 (discard up to 3 cards for a roll bonus).
+const handleMultiPromptResponse = (
+  sourceSocket: Socket<ClientToServerEvents, ServerToClientEvents>,
+  promptId: string,
+  selectedOptionIds: string[],
+  sendRoomUpdate: () => void
+) => {
+  const request = abilityPromptRequests.get(promptId);
+  if (!request) {
+    sourceSocket.emit('actionFailed', 'Prompt request not found.');
+    return;
+  }
+  const gameState = getRoomState(sourceSocket.data.roomCode as string);
+  if (!gameState) return;
+
+  const sourcePlayer = getPlayerBySocketId(gameState, request.sourcePlayerId);
+  if (!sourcePlayer) {
+    sourceSocket.emit('actionFailed', 'Ability source player not found.');
+    return;
+  }
+
+  // De-dupe and keep only ids that are valid options on this prompt.
+  const validIds = new Set(request.options.map((o) => o.id));
+  const chosen = [...new Set(selectedOptionIds)].filter((id) => validIds.has(id));
+
+  const min = request.minSelections ?? 0;
+  const max = request.maxSelections ?? request.options.length;
+  if (chosen.length < min || chosen.length > max) {
+    sourceSocket.emit('actionFailed', `Select between ${min} and ${max} card(s).`);
+    return;
+  }
+
+  abilityPromptRequests.delete(promptId);
+
+  if (request.effect.action === 'ITEM_I004_DISCARD_SELECT') {
+    const sourceHero = findHeroInPlayerParty(sourcePlayer, request.heroInstanceId);
+    if (!sourceHero) {
+      sourceSocket.emit('actionFailed', 'Source hero not found when resolving prompt.');
+      return;
+    }
+    const bonusPerCard = (request.effect.bonusPerCard as number | undefined) ?? 2;
+    let discarded = 0;
+    for (const optionId of chosen) {
+      const option = request.options.find((o) => o.id === optionId);
+      const cardInstanceId = option?.payload?.cardInstanceId;
+      if (!cardInstanceId) continue;
+      const idx = sourcePlayer.zones.hand.findIndex((c) => c.instanceId === cardInstanceId);
+      if (idx !== -1) {
+        const [card] = sourcePlayer.zones.hand.splice(idx, 1);
+        if (card) {
+          gameState.discardPile.push(card);
+          discarded += 1;
+        }
+      }
+    }
+    executeRollAndEmit(sourceSocket, gameState, sourcePlayer, sourceHero, discarded * bonusPerCard, sendRoomUpdate);
+    return;
+  }
+
+  sendRoomUpdate();
 };
 
 const handlePromptResponse = (
@@ -2072,6 +2166,7 @@ const handlePromptResponse = (
             const [sacrificed] = sourcePlayer.zones.party.splice(heroIdx, 1);
             if (sacrificed) {
               gameState.discardPile.push(sacrificed);
+              triggerSlainMonsterPassive(gameState, sourcePlayer.id, 'ON_SACRIFICE');
               if (sacrificed.equippedItem) {
                 const itemIdx = sourcePlayer.zones.party.findIndex(c => c.instanceId === sacrificed.equippedItem);
                 if (itemIdx !== -1) {
@@ -2103,6 +2198,27 @@ const handlePromptResponse = (
     }
     const partyLeaderCard = sourcePlayer.zones.party.find(c => c.cardType === 'party_leader');
     if (partyLeaderCard) partyLeaderCard.effectUsedThisTurn = true;
+    sendRoomUpdate();
+    return;
+  }
+
+  if (request.isSlainPassive) {
+    if (request.effect.action === 'SLAIN_PICK_FROM_DISCARD') {
+      // m_001 Doombringer: move the chosen discard-pile card to hand (or skip).
+      const cardInstanceId = responsePayload?.cardInstanceId;
+      if (cardInstanceId) {
+        const idx = gameState.discardPile.findIndex(c => c.instanceId === cardInstanceId);
+        if (idx !== -1) {
+          const [card] = gameState.discardPile.splice(idx, 1);
+          if (card) sourcePlayer.zones.hand.push(card);
+        }
+      }
+    } else if (request.effect.action === 'SLAIN_DRAW_EXTRA') {
+      // m_005 Rex Major: draw one extra card (the extra draw does not re-trigger).
+      if (option.id === 'yes' && gameState.mainDeck.length > 0) {
+        sourcePlayer.zones.hand.push(...drawCards(gameState.mainDeck, 1));
+      }
+    }
     sendRoomUpdate();
     return;
   }
@@ -2195,8 +2311,13 @@ const handlePromptResponse = (
   sendRoomUpdate();
 };
 
+// Falls back to the Vite dev server origin for local development. In production,
+// set CORS_ORIGIN to the deployed frontend origin. Must be an explicit origin
+// (not "*") because the client connects with credentials.
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+
 const app = express();
-app.use(cors({origin: process.env.CORS_ORIGIN, credentials: true}));
+app.use(cors({origin: CORS_ORIGIN, credentials: true}));
 app.use(express.json());
 
 const rooms: Record<string, GameState> = {};
@@ -2249,7 +2370,7 @@ app.get('/api/room/:roomCode', (req, res) => {
 });
 
 const httpServer = createServer(app);
-const API_URL = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const API_URL = CORS_ORIGIN;
 
 // Apply the types to the Socket Server
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -2267,6 +2388,13 @@ io.on('connection', (socket: Socket) => {
 
   if (!roomCode || !gameState) {
     socket.emit('actionFailed', 'Room not found or room code missing.');
+    socket.disconnect();
+    return;
+  }
+
+  const isExistingPlayer = !!gameState.players[socket.id];
+  if (!isExistingPlayer && Object.keys(gameState.players).length >= 6) {
+    socket.emit('roomFull', 'This room is full (6 players max).');
     socket.disconnect();
     return;
   }
@@ -2372,13 +2500,13 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const card = drawCards(gameState.mainDeck, 1)[0];
+    const card = drawCardsForPlayer(gameState, player, 1)[0];
     if (!card) return;
 
-    player.zones.hand.push(card);
     player.actionPoints = (player.actionPoints ?? 0) - 1;
 
     socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
+
     sendRoomUpdate();
   });
 
@@ -2402,7 +2530,7 @@ io.on('connection', (socket: Socket) => {
 
     gameState.discardPile.push(...player.zones.hand);
     player.zones.hand = [];
-    player.zones.hand.push(...drawCards(gameState.mainDeck, 5));
+    drawCardsForPlayer(gameState, player, 5);
     player.actionPoints = (player.actionPoints ?? 0) - 3;
 
     sendRoomUpdate();
@@ -3066,26 +3194,31 @@ io.on('connection', (socket: Socket) => {
             if (!itemTrigger.optional) {
               preRollBonus += modifyEffect.amount ?? 0;
             } else {
-              const maxDiscard = itemTrigger.cost?.[0]?.max ?? 3;
-              const availableCount = Math.min(maxDiscard, player.zones.hand.length);
-              const countOptions: AbilityPromptOption[] = [];
-              for (let n = 0; n <= availableCount; n++) {
-                const bonus = n * (modifyEffect.amount ?? 0);
-                countOptions.push({
-                  id: String(n),
-                  label: n === 0 ? 'Skip (no bonus)' : `Discard ${n} card${n > 1 ? 's' : ''} (+${bonus} bonus)`,
-                  payload: { count: n },
-                });
+              const maxDiscard = (itemTrigger.cost?.[0]?.max as number | undefined) ?? 3;
+              const minDiscard = (itemTrigger.cost?.[0]?.min as number | undefined) ?? 0;
+              const bonusPerCard = modifyEffect.amount ?? 0;
+              const availableMax = Math.min(maxDiscard, player.zones.hand.length);
+              if (availableMax < 1) {
+                // Nothing to discard — just roll with no bonus.
+                executeRollAndEmit(socket, gameState, player, hero, 0, sendRoomUpdate);
+                return;
               }
+              const cardOptions: AbilityPromptOption[] = player.zones.hand.map(c => ({
+                id: c.instanceId,
+                label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
+                payload: { cardInstanceId: c.instanceId },
+              }));
               emitAbilityPrompt(socket.id, {
                 promptId: buildPromptId(),
                 roomCode: socket.data.roomCode as string,
                 heroInstanceId: hero.instanceId,
                 sourcePlayerId: socket.id,
-                promptType: 'confirm',
-                message: `${itemTemplate?.name ?? itemInstance.templateId}: Discard cards for a roll bonus?`,
-                options: countOptions,
-                effect: { action: 'ITEM_I004_SELECT_COUNT', bonusPerCard: modifyEffect.amount ?? 0 },
+                promptType: 'multiSelectCard',
+                message: `${itemTemplate?.name ?? itemInstance.templateId}: select up to ${availableMax} card${availableMax > 1 ? 's' : ''} to discard for +${bonusPerCard} each, then confirm.`,
+                options: cardOptions,
+                minSelections: minDiscard,
+                maxSelections: availableMax,
+                effect: { action: 'ITEM_I004_DISCARD_SELECT', bonusPerCard },
                 remainingEffects: [],
                 isItemTrigger: true,
                 itemInstanceId: itemInstance.instanceId,
@@ -3116,6 +3249,10 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('respondToAbilityPrompt', (promptId, selectedOptionId) => {
     handlePromptResponse(socket, promptId, selectedOptionId, sendRoomUpdate);
+  });
+
+  socket.on('respondToAbilityPromptMulti', (promptId, selectedOptionIds) => {
+    handleMultiPromptResponse(socket, promptId, selectedOptionIds, sendRoomUpdate);
   });
 
   socket.on('rollForFirst', () => {

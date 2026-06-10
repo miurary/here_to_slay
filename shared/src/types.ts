@@ -21,10 +21,13 @@ export interface AbilityPromptOption {
 export interface AbilityPrompt {
   promptId: string;
   heroInstanceId: string;
-  promptType: 'selectPlayer' | 'selectCard' | 'discardCard' | 'confirm';
+  promptType: 'selectPlayer' | 'selectCard' | 'discardCard' | 'confirm' | 'multiSelectCard';
   message: string;
   options: AbilityPromptOption[];
   requesterId: string;
+  /** For 'multiSelectCard': the min/max number of options the player must pick before confirming. */
+  minSelections?: number;
+  maxSelections?: number;
 }
 
 export interface PendingChallengeInfo {
@@ -81,6 +84,7 @@ export interface ClientToServerEvents {
   rollHeroAbility: (heroInstanceId: string) => void;
   activateHeroAbility: (heroInstanceId: string) => void;
   respondToAbilityPrompt: (promptId: string, selectedOptionId: string) => void;
+  respondToAbilityPromptMulti: (promptId: string, selectedOptionIds: string[]) => void;
   continueGame: () => void;
   choosePartyLeader: (instanceId: string) => void;
   playHero: (instanceId: string) => void;
@@ -112,6 +116,7 @@ export interface ServerToClientEvents {
   heroPlayAccepted: (heroInstanceId: string) => void;
   challengeResolved: (data: ChallengeResolvedData) => void;
   monsterAttackResult: (data: MonsterAttackResultData) => void;
+  roomFull: (message: string) => void;
 }
 
 // need to fix clanker code

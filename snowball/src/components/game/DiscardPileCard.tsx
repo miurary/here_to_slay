@@ -10,8 +10,8 @@ export default function DiscardPileCard({ gameState, showDiscardPile, setShowDis
   const count = gameState ? gameState.discardPile.length : 0;
 
   return (
-    <div style={{ marginTop: '1rem' }}>
-      <h3>Discard Pile</h3>
+    <div style={{ margin: 0 }}>
+      <h3 style={{ marginBottom: '0.5rem' }}>Discard Pile</h3>
       <div
         onClick={() => {
           if (!gameState) return;

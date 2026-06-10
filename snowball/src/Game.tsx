@@ -32,6 +32,7 @@ export default function Game() {
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
   const [showDiscardPile, setShowDiscardPile] = useState(false);
+  const [showHand, setShowHand] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [justDrew, setJustDrew] = useState(false);
   const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
@@ -40,7 +41,12 @@ export default function Game() {
   const [playHeroPromptOpen, setPlayHeroPromptOpen] = useState(false);
   const [pendingHeroPlayId, setPendingHeroPlayId] = useState<string | null>(null);
   const [pendingHeroAbilityActivationId, setPendingHeroAbilityActivationId] = useState<string | null>(null);
-  const [abilityPrompt, setAbilityPrompt] = useState<AbilityPrompt | null>(null);
+  // Prompts are queued so that multiple prompts triggered in the same tick
+  // (e.g. drawing two Modifiers with Rex Major) are each resolved in turn rather
+  // than overwriting one another. The head of the queue is the active prompt.
+  const [abilityPromptQueue, setAbilityPromptQueue] = useState<AbilityPrompt[]>([]);
+  const abilityPrompt = abilityPromptQueue[0] ?? null;
+  const [multiSelected, setMultiSelected] = useState<string[]>([]);
   const [playHeroRollResult, setPlayHeroRollResult] = useState<string | null>(null);
   const [isHeroRolling, setIsHeroRolling] = useState(false);
   const pendingHeroPlayIdRef = useRef<string | null>(pendingHeroPlayId);
@@ -145,12 +151,14 @@ export default function Game() {
       console.log("is hero rolling: ", isHeroRollingRef.current);
     });
     client.on('abilityPrompt', (prompt) => {
-      setAbilityPrompt(prompt);
+      setAbilityPromptQueue((q) => [...q, prompt]);
       setActionMessage(null);
     });
     client.on('abilityResolution', (data) => {
       setActionMessage(data.message);
-      setAbilityPrompt(null);
+      // Queued prompts are removed only when answered, so a resolution arriving in
+      // the same tick (e.g. alongside a slain-monster passive prompt) leaves the
+      // queue intact.
       setPendingHeroAbilityActivationId(null);
     });
 
@@ -193,6 +201,11 @@ export default function Game() {
       setTimeout(() => setMonsterAttackResult(null), 7000);
     });
 
+    client.on('roomFull', (msg: string) => {
+      client.disconnect();
+      navigate('/', { state: { error: msg } });
+    });
+
     client.on('connect_error', (error) => {
       setStatus(`Unable to join room: ${error.message}`);
     });
@@ -216,6 +229,7 @@ export default function Game() {
       client.off('heroPlayAccepted');
       client.off('challengeResolved');
       client.off('monsterAttackResult');
+      client.off('roomFull');
       client.off('connect_error');
       client.disconnect();
     };
@@ -307,7 +321,24 @@ export default function Game() {
   const handleRespondToAbilityPrompt = (optionId: string) => {
     if (!socket || !abilityPrompt) return;
     socket.emit('respondToAbilityPrompt', abilityPrompt.promptId, optionId);
-    setAbilityPrompt(null);
+    setAbilityPromptQueue((q) => q.slice(1));
+    setMultiSelected([]);
+  };
+
+  const toggleMultiSelect = (optionId: string) => {
+    const max = abilityPrompt?.maxSelections ?? Infinity;
+    setMultiSelected((prev) => {
+      if (prev.includes(optionId)) return prev.filter((id) => id !== optionId);
+      if (prev.length >= max) return prev; // at the cap — ignore further picks
+      return [...prev, optionId];
+    });
+  };
+
+  const handleRespondToAbilityPromptMulti = () => {
+    if (!socket || !abilityPrompt) return;
+    socket.emit('respondToAbilityPromptMulti', abilityPrompt.promptId, multiSelected);
+    setAbilityPromptQueue((q) => q.slice(1));
+    setMultiSelected([]);
   };
 
   const handlePlayHeroRoll = () => {
@@ -470,244 +501,111 @@ export default function Game() {
     });
   };
 
+  const isInGame = !!(gameState && gameState.status === 'in_progress' && gameState.players[myId]);
+
   return (
-    <div className="appShell" onClick={() => setSelectedHeroId(null)}>
+    <div className="gameShell" onClick={() => setSelectedHeroId(null)}>
       <style>{`@keyframes spin {0% { transform: rotateX(0deg) rotateY(0deg); }100% { transform: rotateX(360deg) rotateY(360deg); }}`}</style>
-      <div className="appPage">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '1rem' }}>
-          <div>
-            <h1>Room {roomCode}</h1>
-            <p>Status: <strong>{status}</strong></p>
-          </div>
-          <div>
-            <button type="button" onClick={() => navigate('/')} className="primaryButton">
-              Back to Home
-            </button>
-          </div>
-        </div>
 
-        <div style={{ marginBottom: '1.5rem', maxWidth: '720px' }}>
-          <form onSubmit={handleSubmit} style={{ marginBottom: '1rem' }}>
-            <label htmlFor="username" style={{ display: 'block', marginBottom: '0.5rem' }}>
-              Enter your username:
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Username"
-              style={{ padding: '0.5rem', fontSize: '1rem', width: '100%', maxWidth: '320px', boxSizing: 'border-box' }}
+      {/* ── Fixed-overlay modals (render regardless of layout) ─────────────── */}
+      {isInGame && showHand && gameState && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }} onClick={() => setShowHand(false)}>
+          <div style={{ backgroundColor: 'white', padding: '1.25rem', borderRadius: '16px', width: 'min(94vw, 1100px)', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <h2 style={{ margin: 0 }}>Your Hand</h2>
+              <button type="button" onClick={() => setShowHand(false)} className="primaryButton">Close</button>
+            </div>
+            <HandCard
+              gameState={gameState}
+              myId={myId}
+              selectedHeroId={selectedHeroId}
+              setSelectedHeroId={setSelectedHeroId}
+              setViewedItemId={setViewedItemId}
+              setSelectedHeroLocation={setSelectedHeroLocation}
+              setHeroRollResult={setHeroRollResult}
+              handlePlayHero={handlePlayHero}
+              handlePlayMagic={handlePlayMagic}
+              handleInitiateCursedItemPlay={handleInitiateCursedItemPlay}
+              setPendingItemPlayId={setPendingItemPlayId}
+              setItemPlayPromptOpen={setItemPlayPromptOpen}
+              pendingHeroPlayId={pendingHeroPlayId}
+              selectedHero={selectedHero}
+              selectedHeroLocation={selectedHeroLocation}
+              heroRollResult={heroRollResult}
+              playHeroPromptOpen={playHeroPromptOpen}
+              isHeroRolling={isHeroRolling}
+              selectedHeroAP={selectedHeroAP}
+              handlePlayHeroRoll={handlePlayHeroRoll}
+              handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
+              handleRollHeroAbility={handleRollHeroAbility}
+              handleActivateHeroAbility={handleActivateHeroAbility}
+              pendingHeroAbilityActivationId={pendingHeroAbilityActivationId}
+              playHeroRollResult={playHeroRollResult}
+              isMyTurn={isMyTurn}
             />
-            <button type="submit" style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', fontSize: '1rem' }}>
-              Save Username
-            </button>
-          </form>
-
-          {actionMessage && <div style={{ color: '#c00', marginBottom: '1rem' }}>{actionMessage}</div>}
-          {challengeResult && (
-            <div style={{ padding: '0.75rem 1rem', marginBottom: '1rem', borderRadius: '8px', backgroundColor: challengeResult.challengerWon ? '#fff3cd' : '#d4edda', border: `1px solid ${challengeResult.challengerWon ? '#ffc107' : '#28a745'}`, color: '#333' }}>
-              <strong>Challenge!</strong>{' '}
-              {challengeResult.challengerName} rolled {challengeResult.challengerRoll}
-              {challengeResult.challengerBonus > 0 ? ` +${challengeResult.challengerBonus} = ${challengeResult.challengerTotalRoll}` : ''}{' '}
-              vs {challengeResult.challengedName} rolled {challengeResult.challengedRoll}.{' '}
-              {challengeResult.challengerWon
-                ? `${challengeResult.challengerName} wins — ${challengeResult.cardName} is discarded!`
-                : `${challengeResult.challengedName} wins — ${challengeResult.cardName} is played!`}
-            </div>
-          )}
-          {monsterAttackResult && (
-            <div style={{ padding: '0.75rem 1rem', marginBottom: '1rem', borderRadius: '8px', backgroundColor: monsterAttackResult.slew ? '#d4edda' : '#fff3cd', border: `1px solid ${monsterAttackResult.slew ? '#28a745' : '#ffc107'}`, color: '#333' }}>
-              <strong>{monsterAttackResult.slew ? 'Monster Slain!' : 'Attack Result'}</strong>{' '}
-              {monsterAttackResult.attackerName} rolled <strong>{monsterAttackResult.roll}</strong> against{' '}
-              <strong>{monsterAttackResult.monsterName}</strong> (needed {monsterAttackResult.requiredRoll}).{' '}
-              {monsterAttackResult.effectText}
-            </div>
-          )}
-          {gameState?.pendingChallenge?.pendingPlayerId === myId && (
-            <div style={{ padding: '0.75rem 1rem', marginBottom: '1rem', borderRadius: '8px', backgroundColor: '#fff3cd', border: '1px solid #ffc107', color: '#333' }}>
-              Your <strong>{gameState.pendingChallenge!.pendingCardName}</strong> play is pending — waiting for opponents to respond...
-            </div>
-          )}
+          </div>
         </div>
+      )}
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minHeight: 'calc(100vh - 260px)' }}>
-          <main className="mainContent">
-            {gameState?.status === 'finished' && (() => {
-              const winnerId = gameState.winnerId;
-              const winner = winnerId ? gameState.players[winnerId] : undefined;
-              return (
-                <div style={{ padding: '2rem', borderRadius: '12px', backgroundColor: '#d4edda', border: '2px solid #28a745', marginBottom: '1.5rem', textAlign: 'center' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Game Over!</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                    {winner ? `${winner.username ?? winnerId} wins!` : 'Game over!'}
-                  </div>
-                  <div style={{ marginTop: '0.5rem', color: '#555' }}>
-                    {winner && `${winner.slainMonsters.length} monster${winner.slainMonsters.length !== 1 ? 's' : ''} slain.`}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {gameState?.status === 'waiting' && gameState?.lobbyLeaderId === myId && (
-              <button type="button" onClick={handleStart} style={{ marginBottom: '1.5rem', padding: '0.5rem 1rem', fontSize: '1rem' }}>
-                Start Game
-              </button>
-            )}
-
-            {gameState?.status === 'waiting' && gameState?.lobbyLeaderId !== myId && (
-              <p style={{ marginBottom: '1.5rem', color: '#666' }}>
-                Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to start the game...
-              </p>
-            )}
-
-            {gameState?.status === 'rolling' && (
-              <FirstRollCard
-                gameState={gameState}
-                myId={myId}
-                handleRoll={handleRoll}
-                isRolling={isRolling}
-                myRoll={myRoll}
-              />
-            )}
-
-            {gameState?.status === 'roll_complete' && (
-              <RollCompleteCard
-                gameState={gameState}
-                myId={myId}
-                handleContinue={handleContinue}
-              />
-            )}
-
-            {gameState?.status === 'party_leader_selection' && (
-              <PartyLeaderSelectionCard
-                gameState={gameState}
-                myId={myId}
-                handleChoosePartyLeader={handleChoosePartyLeader}
-              />
-            )}
-
-            {gameState?.status === 'party_leader_review' && (
-              <PartyLeaderReviewCard
-                gameState={gameState}
-                myId={myId}
-                handleContinue={handleContinue}
-              />
-            )}
-
-            {gameState?.status === 'in_progress' && (
-              <button type="button" onClick={handleQuit} style={{ marginBottom: '1.5rem', padding: '0.5rem 1rem', fontSize: '1rem', backgroundColor: '#ff6b6b', color: 'white' }}>
-                Quit Game
-              </button>
-            )}
-            {gameState && (
-              <p>Current game status: <strong>{gameState.status}</strong></p>
-            )}
-
-            {gameState?.status === 'in_progress' && (
-              <GameStatusCard
-                gameState={gameState}
-                myId={myId}
-              />
-            )}
-
-            {gameState && gameState.status === 'in_progress' && gameState.players[myId] && (
-              <>
-                <div className="boardTopRow">
-                  <PartyLeaderCard
-                    gameState={gameState}
-                    myId={myId}
-                    isMyTurn={isMyTurn}
-                    onUsePartyLeaderAbility={handleUsePartyLeaderAbility}
-                  />
-
-                  <PartyCard
-                    gameState={gameState} 
-                    myId={myId}
-                    selectedHeroId={selectedHeroId}
-                    setSelectedHeroId={setSelectedHeroId}
-                    viewedItemId={viewedItemId}
-                    setViewedItemId={setViewedItemId}
-                    setSelectedHeroLocation={setSelectedHeroLocation}
-                    setHeroRollResult={setHeroRollResult}
-                    isMyTurn={isMyTurn}
-                  />
-
-                  <HandCard
-                    gameState={gameState}
-                    myId={myId}
-                    selectedHeroId={selectedHeroId}
-                    setSelectedHeroId={setSelectedHeroId}
-                    setViewedItemId={setViewedItemId}
-                    setSelectedHeroLocation={setSelectedHeroLocation}
-                    setHeroRollResult={setHeroRollResult}
-                    handlePlayHero={handlePlayHero}
-                    handlePlayMagic={handlePlayMagic}
-                    handleInitiateCursedItemPlay={handleInitiateCursedItemPlay}
-                    setPendingItemPlayId={setPendingItemPlayId}
-                    setItemPlayPromptOpen={setItemPlayPromptOpen}
-                    pendingHeroPlayId={pendingHeroPlayId}
-                    selectedHero={selectedHero}
-                    selectedHeroLocation={selectedHeroLocation}
-                    heroRollResult={heroRollResult}
-                    playHeroPromptOpen={playHeroPromptOpen}
-                    isHeroRolling={isHeroRolling}
-                    selectedHeroAP={selectedHeroAP}
-                    handlePlayHeroRoll={handlePlayHeroRoll}
-                    handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
-                    handleRollHeroAbility={handleRollHeroAbility}
-                    handleActivateHeroAbility={handleActivateHeroAbility}
-                    pendingHeroAbilityActivationId={pendingHeroAbilityActivationId}
-                    playHeroRollResult={playHeroRollResult}
-                    isMyTurn={isMyTurn}
-                  />
-                </div>
-                
-                <EndTurnButton 
-                  gameState={gameState}
-                  myId={myId}
-                  handleEndTurn={handleEndTurn}
-                />
-                
-                <MainDeckCard
-                  gameState={gameState}
-                  myId={myId}
-                  showDrawPrompt={showDrawPrompt}
-                  actionMessage={actionMessage}
-                  justDrew={justDrew}
-                  setActionMessage={setActionMessage}
-                  setShowDrawPrompt={setShowDrawPrompt}
-                  handleDrawFromMain={handleDrawFromMain}
-                  handleMulligan={handleMulligan}
-                />
-
-                <DiscardPileCard
-                  gameState={gameState}
-                  showDiscardPile={showDiscardPile}
-                  setShowDiscardPile={setShowDiscardPile}
-                />
-              </>
-            )}
-          </main>
-
-          <aside className="sidebar">
+      <div onClick={(e) => e.stopPropagation()}>
+        <aside className="sidebarModals">
             {abilityPrompt && (
               <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
                 <div style={{ backgroundColor: 'white', padding: '1.5rem', borderRadius: '12px', width: 'min(90vw, 480px)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
-                  <h3 style={{ marginTop: 0 }}>Ability Prompt</h3>
+                  <h3 style={{ marginTop: 0 }}>
+                    Ability Prompt
+                    {abilityPromptQueue.length > 1 && (
+                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#64748b', marginLeft: '0.5rem' }}>
+                        ({abilityPromptQueue.length - 1} more pending)
+                      </span>
+                    )}
+                  </h3>
                   <p>{abilityPrompt.message}</p>
-                  <div style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}>
-                    {abilityPrompt.options.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => handleRespondToAbilityPrompt(option.id)}
-                        style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: 'none', backgroundColor: '#007bff', color: 'white', cursor: 'pointer' }}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                  {abilityPrompt.promptType === 'multiSelectCard' ? (
+                    <>
+                      <div style={{ display: 'grid', gap: '0.5rem', marginTop: '1rem', maxHeight: '50vh', overflowY: 'auto' }}>
+                        {abilityPrompt.options.map((option) => {
+                          const selected = multiSelected.includes(option.id);
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => toggleMultiSelect(option.id)}
+                              style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: selected ? '2px solid #1d4ed8' : '1px solid #cbd5e1', backgroundColor: selected ? '#dbeafe' : 'white', color: '#111827', cursor: 'pointer', textAlign: 'left', fontWeight: selected ? 700 : 400 }}
+                            >
+                              {selected ? '☑' : '☐'} {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                        <span style={{ fontSize: '0.85rem', color: '#475569' }}>
+                          {multiSelected.length} selected{abilityPrompt.maxSelections ? ` / ${abilityPrompt.maxSelections} max` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleRespondToAbilityPromptMulti}
+                          disabled={multiSelected.length < (abilityPrompt.minSelections ?? 0)}
+                          style={{ padding: '0.6rem 1.25rem', borderRadius: '8px', border: 'none', backgroundColor: multiSelected.length < (abilityPrompt.minSelections ?? 0) ? '#cbd5e1' : '#2563eb', color: 'white', cursor: multiSelected.length < (abilityPrompt.minSelections ?? 0) ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+                        >
+                          Confirm
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}>
+                      {abilityPrompt.options.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => handleRespondToAbilityPrompt(option.id)}
+                          style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: 'none', backgroundColor: '#007bff', color: 'white', cursor: 'pointer' }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -940,9 +838,88 @@ export default function Game() {
                 </div>
               );
             })()}
-            {gameState?.status === 'in_progress' && (
-              <>
-                <ActiveMonstersSidebarCard
+        </aside>
+      </div>
+
+      <div className="gameGrid">
+        {/* Row 1 — header: room code + username + back */}
+        <header className="gameHeader">
+          <div className="gameHeaderLeft">
+            <h1>Room {roomCode}</h1>
+            <p>Status: <strong>{status}</strong></p>
+          </div>
+          <form className="gameHeaderUsername" onSubmit={handleSubmit}>
+            <input
+              id="username"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Username"
+              className="usernameInput"
+            />
+            <button type="submit" className="primaryButton">Save</button>
+          </form>
+          <button type="button" onClick={() => navigate('/')} className="primaryButton gameHeaderBack">
+            Back to Home
+          </button>
+        </header>
+
+        {/* Row 2 — centered status / info panel */}
+        <div className="gameStatusRow">
+          {isInGame && gameState && <GameStatusCard gameState={gameState} myId={myId} />}
+          {actionMessage && <div className="bannerError">{actionMessage}</div>}
+          {challengeResult && (
+            <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: challengeResult.challengerWon ? '#fff3cd' : '#d4edda', border: `1px solid ${challengeResult.challengerWon ? '#ffc107' : '#28a745'}`, color: '#333' }}>
+              <strong>Challenge!</strong>{' '}
+              {challengeResult.challengerName} rolled {challengeResult.challengerRoll}
+              {challengeResult.challengerBonus > 0 ? ` +${challengeResult.challengerBonus} = ${challengeResult.challengerTotalRoll}` : ''}{' '}
+              vs {challengeResult.challengedName} rolled {challengeResult.challengedRoll}.{' '}
+              {challengeResult.challengerWon
+                ? `${challengeResult.challengerName} wins — ${challengeResult.cardName} is discarded!`
+                : `${challengeResult.challengedName} wins — ${challengeResult.cardName} is played!`}
+            </div>
+          )}
+          {monsterAttackResult && (
+            <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: monsterAttackResult.slew ? '#d4edda' : '#fff3cd', border: `1px solid ${monsterAttackResult.slew ? '#28a745' : '#ffc107'}`, color: '#333' }}>
+              <strong>{monsterAttackResult.slew ? 'Monster Slain!' : 'Attack Result'}</strong>{' '}
+              {monsterAttackResult.attackerName} rolled <strong>{monsterAttackResult.roll}</strong> against{' '}
+              <strong>{monsterAttackResult.monsterName}</strong> (needed {monsterAttackResult.requiredRoll}).{' '}
+              {monsterAttackResult.effectText}
+            </div>
+          )}
+          {gameState?.pendingChallenge?.pendingPlayerId === myId && (
+            <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: '#fff3cd', border: '1px solid #ffc107', color: '#333' }}>
+              Your <strong>{gameState.pendingChallenge!.pendingCardName}</strong> play is pending — waiting for opponents to respond...
+            </div>
+          )}
+        </div>
+
+        {/* Row 3 — board: party leader (left) | party (center) | active monsters (right) */}
+        {isInGame && gameState ? (
+          <div className="gameBoard">
+            <div className="boardLeft">
+              <PartyLeaderCard
+                gameState={gameState}
+                myId={myId}
+                isMyTurn={isMyTurn}
+                onUsePartyLeaderAbility={handleUsePartyLeaderAbility}
+              />
+            </div>
+            <div className="boardCenter">
+              <PartyCard
+                gameState={gameState}
+                myId={myId}
+                selectedHeroId={selectedHeroId}
+                setSelectedHeroId={setSelectedHeroId}
+                viewedItemId={viewedItemId}
+                setViewedItemId={setViewedItemId}
+                setSelectedHeroLocation={setSelectedHeroLocation}
+                setHeroRollResult={setHeroRollResult}
+                isMyTurn={isMyTurn}
+              />
+            </div>
+            <div className="boardRight">
+              <ActiveMonstersSidebarCard
                 gameState={gameState}
                 myId={myId}
                 isMyTurn={isMyTurn}
@@ -950,30 +927,121 @@ export default function Game() {
                 setSelectedMonsterId={setSelectedMonsterId}
                 onAttackMonster={handleAttackMonster}
               />
+            </div>
+          </div>
+        ) : (
+          <div className="gameBoardPre">
+            <div className="boardPreInner">
+              {gameState?.status === 'finished' && (() => {
+                const winnerId = gameState.winnerId;
+                const winner = winnerId ? gameState.players[winnerId] : undefined;
+                return (
+                  <div style={{ padding: '2rem', borderRadius: '12px', backgroundColor: '#d4edda', border: '2px solid #28a745', textAlign: 'center' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Game Over!</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
+                      {winner ? `${winner.username ?? winnerId} wins!` : 'Game over!'}
+                    </div>
+                    <div style={{ marginTop: '0.5rem', color: '#555' }}>
+                      {winner && `${winner.slainMonsters.length} monster${winner.slainMonsters.length !== 1 ? 's' : ''} slain.`}
+                    </div>
+                  </div>
+                );
+              })()}
 
-                <OpponentInformationCard
-                  gameState={gameState}
-                  myId={myId}
-                  selectedOpponentPartyId={selectedOpponentPartyId}
-                  viewedItemId={viewedItemId}
-                  setSelectedOpponentPartyId={setSelectedOpponentPartyId}
-                  setViewedItemId={setViewedItemId}
-                />
-              </>
-            )}
+              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId === myId && (
+                <button type="button" onClick={handleStart} className="primaryButton" style={{ alignSelf: 'flex-start' }}>
+                  Start Game
+                </button>
+              )}
 
-            <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
-              <h3>Players Connected</h3>
-              {players.length === 0 ? (
-                <p>No players connected yet.</p>
-              ) : (
-                players.map((player) => (
-                  <p key={player.id}>{player.username || player.id}</p>
-                ))
+              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId !== myId && (
+                <p style={{ color: '#666' }}>
+                  Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to start the game...
+                </p>
+              )}
+
+              {gameState?.status === 'rolling' && (
+                <FirstRollCard gameState={gameState} myId={myId} handleRoll={handleRoll} isRolling={isRolling} myRoll={myRoll} />
+              )}
+
+              {gameState?.status === 'roll_complete' && (
+                <RollCompleteCard gameState={gameState} myId={myId} handleContinue={handleContinue} />
+              )}
+
+              {gameState?.status === 'party_leader_selection' && (
+                <PartyLeaderSelectionCard gameState={gameState} myId={myId} handleChoosePartyLeader={handleChoosePartyLeader} />
+              )}
+
+              {gameState?.status === 'party_leader_review' && (
+                <PartyLeaderReviewCard gameState={gameState} myId={myId} handleContinue={handleContinue} />
+              )}
+
+              <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
+                <h3>Players Connected</h3>
+                {players.length === 0 ? (
+                  <p>No players connected yet.</p>
+                ) : (
+                  players.map((player) => (
+                    <p key={player.id}>{player.username || player.id}</p>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Row 4 — footer: deck/discard (left) | hand button | opponents (right) */}
+        {isInGame && gameState && (
+          <footer className="gameFooter">
+            <div className="footerLeft">
+              <MainDeckCard
+                gameState={gameState}
+                myId={myId}
+                showDrawPrompt={showDrawPrompt}
+                actionMessage={actionMessage}
+                justDrew={justDrew}
+                setActionMessage={setActionMessage}
+                setShowDrawPrompt={setShowDrawPrompt}
+                handleDrawFromMain={handleDrawFromMain}
+                handleMulligan={handleMulligan}
+              />
+              <DiscardPileCard
+                gameState={gameState}
+                showDiscardPile={showDiscardPile}
+                setShowDiscardPile={setShowDiscardPile}
+              />
+            </div>
+            <div className="footerHand">
+              <button
+                type="button"
+                className="handButton"
+                onClick={(event) => { event.stopPropagation(); setShowHand(true); }}
+              >
+                🃏 Your Hand ({gameState.players[myId].zones.hand.length})
+              </button>
+              <EndTurnButton gameState={gameState} myId={myId} handleEndTurn={handleEndTurn} />
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={handleQuit}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '0.75rem 1rem', fontSize: '0.9rem', backgroundColor: '#ff6b6b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                >
+                  Quit Game
+                </button>
               )}
             </div>
-          </aside>
-        </div>
+            <div className="footerOpponents">
+              <OpponentInformationCard
+                gameState={gameState}
+                myId={myId}
+                selectedOpponentPartyId={selectedOpponentPartyId}
+                viewedItemId={viewedItemId}
+                setSelectedOpponentPartyId={setSelectedOpponentPartyId}
+                setViewedItemId={setViewedItemId}
+              />
+            </div>
+          </footer>
+        )}
       </div>
     </div>
   );
