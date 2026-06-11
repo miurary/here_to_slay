@@ -1,0 +1,6 @@
+.dist
+snowball/dist
+snowball/node_modules
+wiggles/dist
+wiggles/node_modules
+.git

@@ -141,7 +141,7 @@ export interface Effect {
   zone?: string;
   duration?: number;
   modifierType?: string;
-  condition?: { type?: string; zone?: string; class?: string; cardClass?: string };
+  condition?: { type?: string; zone?: string; class?: string; cardClass?: string; amount?: number };
   remaining?: number;
   monsterName?: string;
   finalRoll?: number;
@@ -210,6 +210,8 @@ export interface CardTemplate {
   targetRequirement?: { eligibility?: string; zone?: string; cardType?: string };
   abilityText?: string;
   slainEffectText?: string;
+  /** Number of copies of this template to put in the deck (default 1). */
+  deckCount?: number;
   [key: string]: unknown;
 }
 

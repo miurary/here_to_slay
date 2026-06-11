@@ -6,6 +6,7 @@
         "abilityText": "Play this card after any player (including you) rolls the dice. +2 or -2 to that roll.",
         "playTiming": "AFTER_ROLL",
         "target": "any_roll",
+        "deckCount": 9,
         "choices": [
             {
                 "label": "+2",
@@ -24,6 +25,7 @@
         "abilityText": "Play this card after any player (including you) rolls the dice. +2 or -2 to that roll. If you are attacking a Monster card, +4 to that roll instead.",
         "playTiming": "AFTER_ROLL",
         "target": "any_roll",
+        "deckCount": 1,
         "choices": [
             {
                 "label": "+2",
@@ -49,6 +51,7 @@
         "abilityText": "Play this card after any player (including you) rolls the dice. +3 or -1 to that roll.",
         "playTiming": "AFTER_ROLL",
         "target": "any_roll",
+        "deckCount": 4,
         "choices": [
             {
                 "label": "+3",
@@ -67,6 +70,7 @@
         "abilityText": "Play this card after any player (including you) rolls the dice. +4 to that roll.",
         "playTiming": "AFTER_ROLL",
         "target": "any_roll",
+        "deckCount": 4,
         "effects": [{ "action": "MODIFY_ROLL", "amount": 4 }]
     },
     "mod_005": {
@@ -76,6 +80,39 @@
         "abilityText": "Play this card after any player (including you) rolls the dice. -4 to that roll.",
         "playTiming": "AFTER_ROLL",
         "target": "any_roll",
+        "deckCount": 4,
         "effects": [{ "action": "MODIFY_ROLL", "amount": -4 }]
+    },
+    "mod_006": {
+        "id": "mod_006",
+        "name": "Modifier",
+        "type": "modifier",
+        "abilityText": "Play this card after any player (including you) rolls the dice. +1 or -3 to that roll.",
+        "playTiming": "AFTER_ROLL",
+        "target": "any_roll",
+        "deckCount": 4,
+        "choices": [
+            {
+                "label": "+1",
+                "effects": [{ "action": "MODIFY_ROLL", "amount": 1 }]
+            },
+            {
+                "label": "-3",
+                "effects": [{ "action": "MODIFY_ROLL", "amount": -3 }]
+            }
+        ]
+    },
+    "mod_007": {
+        "id": "mod_007",
+        "name": "Modifier",
+        "type": "modifier",
+        "abilityText": "Play this card after any player (including you) rolls the dice. DISCARD your hand, +7 to that roll.",
+        "playTiming": "AFTER_ROLL",
+        "target": "any_roll",
+        "deckCount": 1,
+        "effects": [
+            { "action": "MODIFY_ROLL", "amount": 7 },
+            { "action": "DISCARD_HAND" }
+        ]
     }
 }

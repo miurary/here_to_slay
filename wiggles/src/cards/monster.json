@@ -4,8 +4,8 @@
         "name": "Doombringer",
         "type": "monster",
         "requirements": [
-            { "class": "necromancer", "amount": 1},
-            { "class": "hero", "amount": 1}
+            { "class": "necromancer", "amount": 1 },
+            { "class": "hero", "amount": 1 }
         ],
         "lowerBound": 4,
         "lowerBoundEffect": [
@@ -14,7 +14,7 @@
         "lowerBoundText": "DISCARD your hand",
         "upperBound": 8,
         "upperBoundEffect": [
-            { "action": "SLAY", "target": "monster"}
+            { "action": "SLAY", "target": "monster" }
         ],
         "upperBoundText": "SLAY this Monster card",
         "slainEffect": {
@@ -32,17 +32,17 @@
         "name": "Mega Slime",
         "type": "monster",
         "requirements": [
-            { "class": "hero", "amount": 4}
+            { "class": "hero", "amount": 4 }
         ],
         "lowerBound": 7,
         "lowerBoundEffect": [
-            { "action": "SACRIFICE", "amount": -1, "target": "self" }
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
         ],
         "lowerBoundText": "SACRIFICE a Hero card",
         "upperBound": 8,
         "upperBoundEffect": [
-            { "action": "SLAY", "target": "monster"},
-            { "action": "DRAW", "amount": 2, "target": "self"}
+            { "action": "SLAY", "target": "monster" },
+            { "action": "DRAW", "amount": 2, "target": "self" }
         ],
         "upperBoundText": "SLAY this Monster card & DRAW 2 cards",
         "slainEffect": {
@@ -58,8 +58,8 @@
         "name": "Warworn Owlbear",
         "type": "monster",
         "requirements": [
-            { "class": "thief", "amount": 1},
-            { "class": "hero", "amount": 1}
+            { "class": "thief", "amount": 1 },
+            { "class": "hero", "amount": 1 }
         ],
         "lowerBound": 4,
         "lowerBoundEffect": [
@@ -68,11 +68,11 @@
         "lowerBoundText": "DISCARD 2 cards",
         "upperBound": 8,
         "upperBoundEffect": [
-            { "action": "SLAY", "target": "monster"}
+            { "action": "SLAY", "target": "monster" }
         ],
         "upperBoundText": "SLAY this Monster card",
         "slainEffect": {
-            "triggerEvent": "NO_TRIGGER",
+            "triggerEvent": "PASSIVE",
             "isOptional": false,
             "action": "APPLY_ROOM_FLAG",
             "flag": "blockItemChallenges",
@@ -86,8 +86,8 @@
         "name": "Dark Dragon King",
         "type": "monster",
         "requirements": [
-            { "class": "bard", "amount": 1},
-            { "class": "hero", "amount": 1}
+            { "class": "bard", "amount": 1 },
+            { "class": "hero", "amount": 1 }
         ],
         "lowerBound": 4,
         "lowerBoundEffect": [
@@ -96,7 +96,7 @@
         "lowerBoundText": "DISCARD 2 cards",
         "upperBound": 8,
         "upperBoundEffect": [
-            { "action": "SLAY", "target": "monster"}
+            { "action": "SLAY", "target": "monster" }
         ],
         "upperBoundText": "SLAY this Monster card",
         "slainEffect": {
@@ -114,8 +114,8 @@
         "name": "Rex Major",
         "type": "monster",
         "requirements": [
-            { "class": "Guardian", "amount": 1},
-            { "class": "hero", "amount": 1}
+            { "class": "guardian", "amount": 1 },
+            { "class": "hero", "amount": 1 }
         ],
         "lowerBound": 4,
         "lowerBoundEffect": [
@@ -124,7 +124,7 @@
         "lowerBoundText": "DISCARD 2 cards",
         "upperBound": 8,
         "upperBoundEffect": [
-            { "action": "SLAY", "target": "monster"}
+            { "action": "SLAY", "target": "monster" }
         ],
         "upperBoundText": "SLAY this Monster card",
         "slainEffect": {
@@ -132,11 +132,326 @@
             "isOptional": true,
             "action": "DRAW_CARD",
             "condition": "REVEAL_TRIGGER_CARD",
-            "zoneToSelectFrom": "deck",
             "amount": 1,
             "destination": "hand"
         },
         "slainEffectText": "Each time you DRAW a Modifier card, you may reveal it and DRAW a second card."
+    },
+    "m_006": {
+        "id": "m_006",
+        "name": "Crowned Serpent",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 2 }
+        ],
+        "lowerBound": 7,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 10,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_MODIFIER_PLAYED_ANY",
+            "isOptional": true,
+            "action": "DRAW_CARD",
+            "amount": 1,
+            "destination": "hand"
+        },
+        "slainEffectText": "Each time any player (including you) plays a Modifier card, you may DRAW a card."
+    },
+    "m_007": {
+        "id": "m_007",
+        "name": "Arctic Aries",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 6,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 10,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_HERO_ABILITY_SUCCESS",
+            "isOptional": true,
+            "action": "DRAW_CARD",
+            "amount": 1,
+            "destination": "hand"
+        },
+        "slainEffectText": "Each time you successfully roll to use a Hero card's effect, you may DRAW a card."
+    },
+    "m_008": {
+        "id": "m_008",
+        "name": "Orthus",
+        "type": "monster",
+        "requirements": [
+            { "class": "wizard", "amount": 1 },
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_DRAW_MAGIC",
+            "isOptional": true,
+            "action": "PLAY_DRAWN_CARD",
+            "cardType": "magic"
+        },
+        "slainEffectText": "Each time you DRAW a Magic card, you may play it immediately."
+    },
+    "m_009": {
+        "id": "m_009",
+        "name": "Bloodwing",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 2 }
+        ],
+        "lowerBound": 6,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 9,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_CHALLENGED",
+            "isOptional": false,
+            "action": "FORCE_CHALLENGER_DISCARD",
+            "amount": 1
+        },
+        "slainEffectText": "Each time another player CHALLENGES you, that player must DISCARD a card."
+    },
+    "m_010": {
+        "id": "m_010",
+        "name": "Malamammoth",
+        "type": "monster",
+        "requirements": [
+            { "class": "ranger", "amount": 1 },
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_DRAW_ITEM",
+            "isOptional": true,
+            "action": "PLAY_DRAWN_CARD",
+            "cardType": "item"
+        },
+        "slainEffectText": "Each time you DRAW an item card, you may play it immediately."
+    },
+    "m_011": {
+        "id": "m_011",
+        "name": "Dracos",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 5,
+        "lowerBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "lowerBoundText": "SLAY this Monster card",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "upperBoundText": "SACRIFICE a Hero card",
+        "slainEffect": {
+            "triggerEvent": "ON_HERO_DESTROYED",
+            "isOptional": true,
+            "action": "DRAW_CARD",
+            "amount": 1,
+            "destination": "hand"
+        },
+        "slainEffectText": "Each time a Hero card in your Party is destroyed, you may DRAW a card."
+    },
+    "m_012": {
+        "id": "m_012",
+        "name": "Corrupted Sabretooth",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 3 }
+        ],
+        "lowerBound": 6,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 9,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" },
+            { "action": "DRAW", "amount": 1, "target": "self" }
+        ],
+        "upperBoundText": "SLAY this Monster card & DRAW a card",
+        "slainEffect": {
+            "triggerEvent": "ON_DESTROY_HERO",
+            "isOptional": true,
+            "action": "STEAL_INSTEAD_OF_DESTROY"
+        },
+        "slainEffectText": "Each time you would DESTROY a Hero card, you may STEAL that Hero card instead."
+    },
+    "m_013": {
+        "id": "m_013",
+        "name": "Reptilian Ripper",
+        "type": "monster",
+        "requirements": [
+            { "class": "berserker", "amount": 1 },
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 6,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE 2 Hero cards",
+        "upperBound": 7,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_ATTACK_ROLL",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "ATTACK_MONSTER_ROLLS",
+            "modifier": 2,
+            "target": "self"
+        },
+        "slainEffectText": "Each time you roll to ATTACK a Monster card, +2 to your roll."
+    },
+    "m_014": {
+        "id": "m_014",
+        "name": "Terratuga",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 7,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 11,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "PASSIVE",
+            "isOptional": false,
+            "action": "APPLY_ROOM_FLAG",
+            "flag": "blockHeroDestruction",
+            "duration": "END_OF_GAME",
+            "target": "self"
+        },
+        "slainEffectText": "Your Hero cards cannot be destroyed."
+    },
+    "m_015": {
+        "id": "m_015",
+        "name": "Titan Wyvern",
+        "type": "monster",
+        "requirements": [
+            { "class": "fighter", "amount": 1 },
+            { "class": "hero", "amount": 1 }
+        ],
+        "lowerBound": 4,
+        "lowerBoundEffect": [
+            { "action": "DISCARD", "amount": 2, "target": "self" }
+        ],
+        "lowerBoundText": "DISCARD 2 cards",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_CHALLENGE",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "CHALLENGE_ROLLS",
+            "modifier": 1,
+            "target": "self"
+        },
+        "slainEffectText": "Each time you roll for a Challenge card, +1 to your roll."
+    },
+    "m_016": {
+        "id": "m_016",
+        "name": "Anuran Cauldron",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 3 }
+        ],
+        "lowerBound": 6,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 7,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_ANY_ROLL",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "ALL_ROLLS",
+            "modifier": 1,
+            "target": "self"
+        },
+        "slainEffectText": "Each time you roll, +1 to your roll."
+    },
+    "m_017": {
+        "id": "m_017",
+        "name": "Abyss Queen",
+        "type": "monster",
+        "requirements": [
+            { "class": "hero", "amount": 2 }
+        ],
+        "lowerBound": 5,
+        "lowerBoundEffect": [
+            { "action": "SACRIFICE", "amount": 1, "target": "self" }
+        ],
+        "lowerBoundText": "SACRIFICE a Hero card",
+        "upperBound": 8,
+        "upperBoundEffect": [
+            { "action": "SLAY", "target": "monster" }
+        ],
+        "upperBoundText": "SLAY this Monster card",
+        "slainEffect": {
+            "triggerEvent": "ON_OPPONENT_MODIFIER",
+            "isOptional": false,
+            "action": "PERSISTENT_MODIFIER",
+            "applies_to": "OPPONENT_MODIFIER_REACTION",
+            "modifier": 1,
+            "target": "self"
+        },
+        "slainEffectText": "Each time another player plays a Modifier card on one of your rolls, +1 to your roll."
     }
 }
-    

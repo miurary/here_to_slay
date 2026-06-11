@@ -4,12 +4,11 @@
         "name": "The Raging Manticore",
         "class": "berserker",
         "abilityText": "Each time you SLAY a Monster card, DRAW 2 cards.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
             "triggerEvent": "ON_SLAY",
             "isOptional": false,
             "action": "DRAW",
-            "zoneToSelectFrom": "deck",
             "amount": 2,
             "destination": "hand"
         }
@@ -17,9 +16,9 @@
     "p_002": {
         "id": "p_002",
         "name": "The Fist of Reason",
-        "class": "warrior",
+        "class": "fighter",
         "abilityText": "Each time you roll to CHALLENGE, +2 to your roll.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
             "triggerEvent": "ON_CHALLENGE",
             "isOptional": false,
@@ -34,7 +33,7 @@
         "name": "The Charismatic Song",
         "class": "bard",
         "abilityText": "Each time you roll to use a Hero card's effect, +1 to your roll.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
             "triggerEvent": "ON_HERO_ABILITY_ROLL",
             "isOptional": false,
@@ -49,7 +48,7 @@
         "name": "The Protecting Horn",
         "class": "guardian",
         "abilityText": "Each time you play a Modifier card on a roll, +1 or -1 to that roll.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
             "triggerEvent": "ON_MODIFIER_PLAYED",
             "isOptional": false,
@@ -64,13 +63,13 @@
         "name": "The Divine Arrow",
         "class": "ranger",
         "abilityText": "Each time you roll to ATTACK a Monster card, +1 to your roll.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
             "triggerEvent": "ON_ATTACK_ROLL",
             "isOptional": false,
             "action": "APPLY_ROLL_MODIFIER",
             "amount": 1,
-            "mduration": "SINGLE_ROLL",
+            "duration": "SINGLE_ROLL",
             "target": "self"
         }
     },
@@ -79,13 +78,12 @@
         "name": "The Shadow Claw",
         "class": "thief",
         "abilityText": "Once per turn on your turn, you may spend an action point to pull a card from another player's hand.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
-            "triggerEvent": "ON_TURN_START",
+            "triggerEvent": "ACTIVE",
             "isOptional": true,
             "action": "STEAL_CARD",
-            "cost": "AP",
-            "zoneToSelectFrom": "opponent_hand",
+            "apCost": 1,
             "destination": "hand",
             "target": "ANY_OPPONENT"
         }
@@ -95,14 +93,27 @@
         "name": "The Cloaked Sage",
         "class": "wizard",
         "abilityText": "Each time you play a Magic card, DRAW a card.",
-        "type": "partyLeader",
+        "type": "party_leader",
         "effect": {
-            "triggerEvent": "ON_DRAW_MAGIC",
+            "triggerEvent": "ON_PLAY_MAGIC",
             "isOptional": false,
             "action": "DRAW",
-            "zoneToSelectFrom": "deck",
+            "amount": 1,
+            "destination": "hand"
+        }
+    },
+    "p_008": {
+        "id": "p_008",
+        "name": "The Gnawing Dead",
+        "class": "necromancer",
+        "abilityText": "Once per turn on your turn, you may spend 2 action points to search the discard pile for a card and add it to your hand.",
+        "type": "party_leader",
+        "effect": {
+            "triggerEvent": "ACTIVE",
+            "isOptional": true,
+            "action": "SEARCH_DISCARD",
+            "apCost": 2,
             "destination": "hand"
         }
     }
-
 }

@@ -6,8 +6,9 @@
         "subtype": "cursed",
         "abilityText": "You cannot use the equipped Hero card's effect.",
         "playTarget": "hero",
+        "deckCount": 1,
         "passiveModifiers": [
-            { "stat": "heroEffectLocked", "value": true}
+            { "stat": "heroEffectLocked", "value": true }
         ]
     },
     "ci_002": {
@@ -17,6 +18,7 @@
         "subtype": "cursed",
         "abilityText": "Each time you roll to use the equipped Hero card's effect, -2 to your roll.",
         "playTarget": "hero",
+        "deckCount": 2,
         "trigger": {
             "event": "ON_HERO_ROLL_ATTEMPT",
             "scope": "equipped_hero",
@@ -33,6 +35,7 @@
         "subtype": "cursed",
         "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, SACRIFICE a Hero card.",
         "playTarget": "hero",
+        "deckCount": 1,
         "trigger": {
             "event": "ON_HERO_ROLL_FAIL",
             "scope": "equipped_hero",
@@ -49,6 +52,7 @@
         "subtype": "cursed",
         "abilityText": "If you successfully roll to use the equipped Hero card's effect, DISCARD a card.",
         "playTarget": "hero",
+        "deckCount": 1,
         "trigger": {
             "event": "ON_HERO_ROLL_SUCCESS",
             "scope": "equipped_hero",
@@ -57,5 +61,17 @@
                 { "action": "DISCARD", "target": "self", "amount": 1 }
             ]
         }
+    },
+    "ci_005": {
+        "id": "ci_005",
+        "name": "Soulbound Grimoire",
+        "type": "item",
+        "subtype": "cursed",
+        "abilityText": "Rolling to use the equipped Hero card's effect costs 2 action points.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "rollCostAP", "value": 2 }
+        ]
     }
 }
