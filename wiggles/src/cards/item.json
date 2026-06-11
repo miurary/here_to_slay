@@ -5,6 +5,7 @@
         "type": "item",
         "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, you may SACRIFICE this card, then roll to use that effect again immediately.",
         "playTarget": "hero",
+        "deckCount": 1,
         "trigger": {
             "event": "ON_HERO_ROLL_FAIL",
             "scope": "equipped_hero",
@@ -23,8 +24,9 @@
         "type": "item",
         "abilityText": "The equipped Hero card is considered a Ranger instead of its original class.",
         "playTarget": "hero",
+        "deckCount": 1,
         "passiveModifiers": [
-            { "stat": "class", "override": "ranger" } 
+            { "stat": "class", "override": "ranger" }
         ]
     },
     "i_003": {
@@ -33,12 +35,13 @@
         "type": "item",
         "abilityText": "Each time you roll to use the equipped Hero card's effect, +2 to your roll.",
         "playTarget": "hero",
+        "deckCount": 2,
         "trigger": {
             "event": "ON_HERO_ROLL_ATTEMPT",
             "scope": "equipped_hero",
             "optional": false,
             "effects": [
-                { "action": "MODIFY_ROLL", "amount": 2}
+                { "action": "MODIFY_ROLL", "amount": 2 }
             ]
         }
     },
@@ -46,24 +49,139 @@
         "id": "i_004",
         "name": "Biggest Ring Ever",
         "type": "item",
-        "abilityText": "Each time you roll to use the equipped Hero card's effect, +2 to your roll.",
+        "abilityText": "Each time you roll to use the equipped Hero card's effect, you may DISCARD up to 3 cards. For each card discarded, +2 to your roll.",
         "playTarget": "hero",
+        "deckCount": 1,
         "trigger": {
             "event": "ON_HERO_ROLL_ATTEMPT",
             "scope": "equipped_hero",
             "optional": true,
             "cost": [
-                {
-                    "action": "DISCARD_CARDS",
-                    "min": 0,
-                    "max": 3,
-                    "target": "self"
-                }
+                { "action": "DISCARD_CARDS", "min": 0, "max": 3, "target": "self" }
             ],
             "effects": [
-                { "action": "MODIFY_ROLL", "amount": 2, "perUnit": "CARDS_DISCARDED"}
+                { "action": "MODIFY_ROLL", "amount": 2, "perUnit": "CARDS_DISCARDED" }
             ]
         }
+    },
+    "i_005": {
+        "id": "i_005",
+        "name": "Fighter Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Fighter instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "fighter" }
+        ]
+    },
+    "i_006": {
+        "id": "i_006",
+        "name": "Bard Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Bard instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "bard" }
+        ]
+    },
+    "i_007": {
+        "id": "i_007",
+        "name": "Thief Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Thief instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "thief" }
+        ]
+    },
+    "i_008": {
+        "id": "i_008",
+        "name": "Wizard Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Wizard instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "wizard" }
+        ]
+    },
+    "i_009": {
+        "id": "i_009",
+        "name": "Necromancer Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Necromancer instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "necromancer" }
+        ]
+    },
+    "i_010": {
+        "id": "i_010",
+        "name": "Particularly Rusty Coin",
+        "type": "item",
+        "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, DRAW a card.",
+        "playTarget": "hero",
+        "deckCount": 2,
+        "trigger": {
+            "event": "ON_HERO_ROLL_FAIL",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "DRAW", "amount": 1, "target": "self" }
+            ]
+        }
+    },
+    "i_011": {
+        "id": "i_011",
+        "name": "Decoy Doll",
+        "type": "item",
+        "abilityText": "If the equipped Hero card would be sacrificed or destroyed, move this card to the discard pile instead.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "redirectSacrificeDestroy", "value": true }
+        ]
+    },
+    "i_012": {
+        "id": "i_012",
+        "name": "Silver Lining",
+        "type": "item",
+        "abilityText": "If you unsuccessfully roll to use the equipped Hero card's effect, +2 to all of your rolls for the rest of your turn.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "trigger": {
+            "event": "ON_HERO_ROLL_FAIL",
+            "scope": "equipped_hero",
+            "optional": false,
+            "effects": [
+                { "action": "APPLY_ROLL_MODIFIER", "amount": 2, "duration": "ALL_ROLL", "target": "self" }
+            ]
+        }
+    },
+    "i_013": {
+        "id": "i_013",
+        "name": "Berserker Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Berserker instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "berserker" }
+        ]
+    },
+    "i_014": {
+        "id": "i_014",
+        "name": "Guardian Mask",
+        "type": "item",
+        "abilityText": "The equipped Hero card is considered a Guardian instead of its original class.",
+        "playTarget": "hero",
+        "deckCount": 1,
+        "passiveModifiers": [
+            { "stat": "class", "override": "guardian" }
+        ]
     }
-
 }

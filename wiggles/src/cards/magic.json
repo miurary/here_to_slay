@@ -2,34 +2,24 @@
     "s_001": {
         "id": "s_001",
         "name": "Destructive Spell",
-        "abilityText": "DISCARD a card, then DESTROY a Hero Card.",
+        "abilityText": "DISCARD a card, then DESTROY a Hero card.",
         "type": "magic",
+        "deckCount": 2,
         "effect": {
             "triggerEvent": "ON_PLAY",
             "isOptional": false,
             "steps": [
-                {
-                    "action": "DISCARD",
-                    "zoneToSelectFrom": "hand",
-                    "amount": 1,
-                    "destination": "discard_pile",
-                    "target": "self"
-                },
-                {
-                    "action": "DESTROY_HERO",
-                    "zoneToSelectFrom": "opponent_party",
-                    "amount": 1,
-                    "destination": "discard_pile",
-                    "target": "ANY_OPPONENT"
-                }
+                { "action": "DISCARD", "zoneToSelectFrom": "hand", "amount": 1, "destination": "discard_pile", "target": "self" },
+                { "action": "DESTROY_HERO", "zoneToSelectFrom": "opponent_party", "amount": 1, "destination": "discard_pile", "target": "ANY_OPPONENT" }
             ]
         }
     },
     "s_002": {
         "id": "s_002",
         "name": "Enchanted Spell",
-        "abilityText": "+2 to all of your rolls until the end of your turn",
+        "abilityText": "+2 to all of your rolls until the end of your turn.",
         "type": "magic",
+        "deckCount": 2,
         "effect": {
             "triggerEvent": "ON_PLAY",
             "isOptional": false,
@@ -42,26 +32,15 @@
     "s_003": {
         "id": "s_003",
         "name": "Forced Exchange",
-        "abilityText": "choose a player. STEAL a Hero card from that player's Party, then move a Hero card from your Party to that player's Party",
+        "abilityText": "Choose a player. STEAL a Hero card from that player's Party, then move a Hero card from your Party to that player's Party.",
         "type": "magic",
+        "deckCount": 1,
         "effect": {
             "triggerEvent": "ON_PLAY",
             "isOptional": false,
             "steps": [
-                {
-                    "action": "STEAL",
-                    "zoneToSelectFrom": "opponent_party",
-                    "amount": 1,
-                    "destination": "party",
-                    "target": "ANY_OPPONENT"
-                },
-                {
-                    "action": "SWAP",
-                    "zoneToSelectFrom": "party",
-                    "amount": 1,
-                    "destination": "opponent_party",
-                    "target": "self"
-                }
+                { "action": "STEAL", "zoneToSelectFrom": "opponent_party", "amount": 1, "destination": "party", "target": "ANY_OPPONENT" },
+                { "action": "SWAP", "zoneToSelectFrom": "party", "amount": 1, "destination": "opponent_party", "target": "self" }
             ]
         }
     },
@@ -70,24 +49,101 @@
         "name": "Critical Boost",
         "abilityText": "DRAW 3 cards and DISCARD a card.",
         "type": "magic",
+        "deckCount": 2,
         "effect": {
             "triggerEvent": "ON_PLAY",
             "isOptional": false,
             "steps": [
-                {
-                    "action": "DRAW",
-                    "zoneToSelectFrom": "deck",
-                    "amount": 3,
-                    "destination": "hand",
-                    "target": "self"
-                },
-                {
-                    "action": "DISCARD",
-                    "zoneToSelectFrom": "hand",
-                    "amount": 1,
-                    "destination": "discard_pile",
-                    "target": "self"
-                }
+                { "action": "DRAW", "zoneToSelectFrom": "deck", "amount": 3, "destination": "hand", "target": "self" },
+                { "action": "DISCARD", "zoneToSelectFrom": "hand", "amount": 1, "destination": "discard_pile", "target": "self" }
+            ]
+        }
+    },
+    "s_005": {
+        "id": "s_005",
+        "name": "Entangling Trap",
+        "abilityText": "DISCARD 2 cards, then STEAL a Hero card.",
+        "type": "magic",
+        "deckCount": 2,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "DISCARD", "zoneToSelectFrom": "hand", "amount": 1, "destination": "discard_pile", "target": "self" },
+                { "action": "DISCARD", "zoneToSelectFrom": "hand", "amount": 1, "destination": "discard_pile", "target": "self" },
+                { "action": "STEAL", "zoneToSelectFrom": "opponent_party", "amount": 1, "destination": "party", "target": "ANY_OPPONENT" }
+            ]
+        }
+    },
+    "s_006": {
+        "id": "s_006",
+        "name": "Mass Sacrifice",
+        "abilityText": "DISCARD your hand, then DRAW 5 cards.",
+        "type": "magic",
+        "deckCount": 2,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "DISCARD_HAND", "target": "self" },
+                { "action": "DRAW", "zoneToSelectFrom": "deck", "amount": 5, "destination": "hand", "target": "self" }
+            ]
+        }
+    },
+    "s_007": {
+        "id": "s_007",
+        "name": "Call to the Fallen",
+        "abilityText": "Search the discard pile for a Hero card and add it to your hand.",
+        "type": "magic",
+        "deckCount": 1,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "RECOVER_HERO", "zoneToSelectFrom": "discard_pile", "amount": 1, "destination": "hand", "target": "self" }
+            ]
+        }
+    },
+    "s_008": {
+        "id": "s_008",
+        "name": "Winds of Change",
+        "abilityText": "Return an Item card equipped to any player's Hero card to that player's hand, then DRAW a card.",
+        "type": "magic",
+        "deckCount": 2,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "RETURN_ITEM", "zoneToSelectFrom": "any_party", "amount": 1, "destination": "hand", "target": "ANY_PLAYER" },
+                { "action": "DRAW", "zoneToSelectFrom": "deck", "amount": 1, "destination": "hand", "target": "self" }
+            ]
+        }
+    },
+    "s_009": {
+        "id": "s_009",
+        "name": "Lightning Labrys",
+        "abilityText": "DISCARD up to 3 cards. For each card discarded, choose a player. That player must SACRIFICE a Hero card.",
+        "type": "magic",
+        "deckCount": 2,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "DISCARD_FOR_SACRIFICE", "zoneToSelectFrom": "hand", "amount": 3, "target": "self" }
+            ]
+        }
+    },
+    "s_010": {
+        "id": "s_010",
+        "name": "Forceful Winds",
+        "abilityText": "Return every equipped Item card to its respective player's hand.",
+        "type": "magic",
+        "deckCount": 1,
+        "effect": {
+            "triggerEvent": "ON_PLAY",
+            "isOptional": false,
+            "steps": [
+                { "action": "RETURN_ALL_ITEMS", "target": "ALL_PLAYERS" }
             ]
         }
     }

@@ -9,18 +9,10 @@
         "activeSkill": {
             "hasDuration": false,
             "costs": [
-                {
-                    "type": "DISCARD",
-                    "cardType": "any",
-                    "amount": 1
-                }
+                { "type": "DISCARD", "cardType": "any", "amount": 1 }
             ],
             "effects": [
-                {
-                    "action": "PROMPT_DISCARD",
-                    "amount": 2,
-                    "target": "all_opponents"
-                }
+                { "action": "PROMPT_DISCARD", "amount": 2, "target": "all_opponents" }
             ]
         }
     },
@@ -34,19 +26,10 @@
         "activeSkill": {
             "hasDuration": true,
             "costs": [
-                {
-                    "type": "DISCARD",
-                    "cardType": "modifier",
-                    "amount": 1
-                }
+                { "type": "DISCARD", "cardType": "modifier", "amount": 1 }
             ],
             "effects": [
-                {
-                    "action": "APPLY_ROOM_FLAG",
-                    "flag": "lockModifiers",
-                    "duration": "END_OF_TURN",
-                    "target": "all_opponents"
-                }
+                { "action": "APPLY_ROOM_FLAG", "flag": "lockModifiers", "duration": "END_OF_TURN", "target": "all_opponents" }
             ]
         }
     },
@@ -60,13 +43,8 @@
         "activeSkill": {
             "hasDuration": false,
             "effects": [
-                {
-                    "action": "SLAY",
-                    "target": "selected"
-                },
-                {
-                    "action": "FORCE_END_TURN"
-                }
+                { "action": "SLAY", "target": "selected" },
+                { "action": "FORCE_END_TURN" }
             ]
         }
     },
@@ -80,19 +58,10 @@
         "activeSkill": {
             "hasDuration": true,
             "costs": [
-                {
-                    "type": "SACRIFICE",
-                    "cardType": "any",
-                    "amount": 1
-                }
+                { "type": "SACRIFICE", "cardType": "any", "amount": 1 }
             ],
             "effects": [
-                {
-                    "action": "APPLY_PLAYER_MODIFIER",
-                    "modifierType": "rollBonus",
-                    "amount": 5,
-                    "duration": "END_OF_TURN"
-                }
+                { "action": "APPLY_PLAYER_MODIFIER", "modifierType": "rollBonus", "amount": 5, "duration": "END_OF_TURN" }
             ]
         }
     },
@@ -105,16 +74,9 @@
         "rollToPlay": 6,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "zone": "discard_pile",
-                "cardType": "modifier"
-            },
+            "targetRequirement": { "zone": "discard_pile", "cardType": "modifier" },
             "effects": [
-                {
-                    "action": "MOVE_CARD",
-                    "target": "selected",
-                    "destination": "hand"
-                }
+                { "action": "MOVE_CARD", "target": "selected", "destination": "hand" }
             ]
         }
     },
@@ -128,12 +90,7 @@
         "activeSkill": {
             "hasDuration": true,
             "effects": [
-                {
-                    "action": "APPLY_PLAYER_MODIFIER",
-                    "modifierType": "rollBonus",
-                    "amount": 5,
-                    "duration": "END_OF_TURN"
-                }
+                { "action": "APPLY_PLAYER_MODIFIER", "modifierType": "rollBonus", "amount": 5, "duration": "END_OF_TURN" }
             ]
         }
     },
@@ -151,11 +108,7 @@
                     "action": "PROMPT_DISCARD",
                     "target": "all_opponents",
                     "amount": 1,
-                    "condition": {
-                        "type": "HAS_CARD_IN_ZONE",
-                        "zone": "party",
-                        "class": "fighter"
-                    }
+                    "condition": { "type": "HAS_CARD_IN_ZONE", "zone": "party", "class": "fighter" }
                 }
             ]
         }
@@ -169,16 +122,9 @@
         "rollToPlay": 5,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "type": "player",
-                "eligibility": "any"
-            },
+            "targetRequirement": { "type": "player", "eligibility": "any" },
             "effects": [
-                {
-                    "action": "PROMPT_DISCARD",
-                    "target": "selected_player",
-                    "amount": 2
-                }
+                { "action": "PROMPT_DISCARD", "target": "selected_player", "amount": 2 }
             ]
         }
     },
@@ -186,21 +132,14 @@
         "id": "h_009",
         "name": "Lookie Rookie",
         "class": "ranger",
-        "abilityText": "Search the discard pile for an item card and add it to your hand.",
+        "abilityText": "Search the discard pile for an Item card and add it to your hand.",
         "type": "hero",
         "rollToPlay": 5,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "zone": "discard_pile",
-                "cardType": "item"
-            },
+            "targetRequirement": { "zone": "discard_pile", "cardType": "item" },
             "effects": [
-                {
-                    "action": "MOVE_CARD",
-                    "target": "selected",
-                    "destination": "hand"
-                }
+                { "action": "MOVE_CARD", "target": "selected", "destination": "hand" }
             ]
         }
     },
@@ -213,15 +152,9 @@
         "rollToPlay": 5,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "type": "player",
-                "eligibility": "opponent"
-            },
+            "targetRequirement": { "type": "player", "eligibility": "opponent" },
             "effects": [
-                {
-                    "action": "VIEW_HAND",
-                    "target": "selected_player"
-                }
+                { "action": "VIEW_HAND", "target": "selected_player" }
             ]
         }
     },
@@ -241,11 +174,7 @@
                     "amount": 1,
                     "source": "hand",
                     "destination": "hand",
-                    "condition": {
-                        "type": "HAS_CARD_IN_ZONE",
-                        "zone": "party",
-                        "cardClass": "thief"
-                    }
+                    "condition": { "type": "HAS_CARD_IN_ZONE", "zone": "party", "cardClass": "thief" }
                 }
             ]
         }
@@ -259,24 +188,10 @@
         "rollToPlay": 10,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "zone": "party",
-                "cardType": "hero",
-                "eligibility": "opponent"
-            },
+            "targetRequirement": { "zone": "party", "cardType": "hero", "eligibility": "opponent" },
             "effects": [
-                {
-                    "action": "MOVE_CARD",
-                    "target": "selected",
-                    "destination": "party"
-                },
-                {
-                    "action": "STEAL_RANDOM_CARD",
-                    "target": "target_owner",
-                    "amount": 1,
-                    "source": "hand",
-                    "destination": "hand"
-                }
+                { "action": "MOVE_CARD", "target": "selected", "destination": "party" },
+                { "action": "STEAL_RANDOM_CARD", "target": "target_owner", "amount": 1, "source": "hand", "destination": "hand" }
             ]
         }
     },
@@ -290,34 +205,8 @@
         "activeSkill": {
             "hasDuration": false,
             "effects": [
-                {
-                    "action": "DRAW",
-                    "amount": 1,
-                    "target": "self"
-                },
-                {
-                    "action": "PLAY_FROM_HAND",
-                    "cardType": "hero",
-                    "target": "self"
-                }
-            ]
-        }
-    },
-    "h_014": {
-        "id": "h_014",
-        "name": "Dumbo",
-        "class": "bard",
-        "abilityText": "DRAW 2 cards.",
-        "type": "hero",
-        "rollToPlay": 7,
-        "activeSkill": {
-            "hasDuration": false,
-            "effects": [
-                {
-                    "action": "DRAW",
-                    "amount": 2,
-                    "target": "self"
-                }
+                { "action": "DRAW", "amount": 1, "target": "self" },
+                { "action": "PLAY_FROM_HAND", "cardType": "hero", "target": "self" }
             ]
         }
     },
@@ -330,16 +219,9 @@
         "rollToPlay": 5,
         "activeSkill": {
             "hasDuration": false,
-            "targetRequirement": {
-                "zone": "discard_pile",
-                "cardType": "magic"
-            },
+            "targetRequirement": { "zone": "discard_pile", "cardType": "magic" },
             "effects": [
-                {
-                    "action": "MOVE_CARD",
-                    "target": "selected",
-                    "destination": "hand"
-                }
+                { "action": "MOVE_CARD", "target": "selected", "destination": "hand" }
             ]
         }
     },
@@ -347,19 +229,712 @@
         "id": "h_016",
         "name": "Spooky",
         "class": "wizard",
-        "abilityText": "Each other player must SACRIFICE a hero card.",
+        "abilityText": "Each other player must SACRIFICE a Hero card.",
         "type": "hero",
         "rollToPlay": 10,
         "activeSkill": {
             "hasDuration": false,
             "effects": [
-                {
-                    "action": "PROMPT_SACRIFICE",
-                    "target": "all_opponents",
-                    "amount": 1,
-                    "cardType": "hero",
-                    "targetZone": "party"
-                }
+                { "action": "PROMPT_SACRIFICE", "target": "all_opponents", "amount": 1, "cardType": "hero", "targetZone": "party" }
+            ]
+        }
+    },
+    "h_017": {
+        "id": "h_017",
+        "name": "Grim Pupper",
+        "class": "necromancer",
+        "abilityText": "Each player (including you) must SACRIFICE a card.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PROMPT_SACRIFICE", "target": "all_players", "amount": 1 }
+            ]
+        }
+    },
+    "h_018": {
+        "id": "h_018",
+        "name": "Beholden Retriever",
+        "class": "necromancer",
+        "abilityText": "SACRIFICE a Hero card. Search the discard pile for a Hero or Item card and add it to your hand, then play it immediately.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "costs": [
+                { "type": "SACRIFICE", "cardType": "hero", "amount": 1 }
+            ],
+            "effects": [
+                { "action": "RECOVER_AND_PLAY", "cardTypes": ["hero", "item"] }
+            ]
+        }
+    },
+    "h_019": {
+        "id": "h_019",
+        "name": "Hollow Husk",
+        "class": "necromancer",
+        "abilityText": "Look at another player's hand. Choose a Magic card (if they have one) and add it to your hand. You may play it immediately.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "TAKE_FROM_HAND", "target": "selected_player", "cardTypeFilter": "magic", "mayPlay": true }
+            ]
+        }
+    },
+    "h_020": {
+        "id": "h_020",
+        "name": "Boston Terror",
+        "class": "necromancer",
+        "abilityText": "Choose a player. That player may give you a card from their hand. If they do not, you may choose 2 cards from the discard pile and add them to your hand.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "GIVE_OR_RECOVER", "recoverAmount": 2 }
+            ]
+        }
+    },
+    "h_021": {
+        "id": "h_021",
+        "name": "Bone Collector",
+        "class": "necromancer",
+        "abilityText": "SACRIFICE an Item card. Search the discard pile for a Hero card and add it to your hand, then play it immediately.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "costs": [
+                { "type": "SACRIFICE", "cardType": "item", "amount": 1 }
+            ],
+            "effects": [
+                { "action": "RECOVER_AND_PLAY", "cardTypes": ["hero"] }
+            ]
+        }
+    },
+    "h_022": {
+        "id": "h_022",
+        "name": "Perfect Vessel",
+        "class": "necromancer",
+        "abilityText": "SACRIFICE this card, then STEAL a Hero card.",
+        "type": "hero",
+        "rollToPlay": 4,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "STEAL_HERO", "sacrificeSelfAfter": true }
+            ]
+        }
+    },
+    "h_023": {
+        "id": "h_023",
+        "name": "Pan Chucks",
+        "class": "fighter",
+        "abilityText": "DRAW 2 cards. If at least one of those cards is a Challenge card, you may reveal it, then DESTROY a Hero card.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW_AND_CHECK", "amount": 2, "matchType": "challenge", "then": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_024": {
+        "id": "h_024",
+        "name": "Bear Claw",
+        "class": "fighter",
+        "abilityText": "Pull a card from another player's hand. If it is a Hero card, pull a second card from that player's hand.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 1, "bonusPullType": "hero" }
+            ]
+        }
+    },
+    "h_025": {
+        "id": "h_025",
+        "name": "Beary Wise",
+        "class": "fighter",
+        "abilityText": "Each other player must DISCARD a card. Choose one of the discarded cards and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PROMPT_DISCARD", "target": "all_opponents", "amount": 1, "collectThenTake": true }
+            ]
+        }
+    },
+    "h_026": {
+        "id": "h_026",
+        "name": "Fury Knuckle",
+        "class": "fighter",
+        "abilityText": "Pull a card from another player's hand. If it is a Challenge card, pull a second card from that player's hand.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 1, "bonusPullType": "challenge" }
+            ]
+        }
+    },
+    "h_027": {
+        "id": "h_027",
+        "name": "Bad Axe",
+        "class": "fighter",
+        "abilityText": "DESTROY a Hero card.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_028": {
+        "id": "h_028",
+        "name": "Qi Bear",
+        "class": "fighter",
+        "abilityText": "DISCARD up to 3 cards. For each card discarded, DESTROY a Hero card.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "MULTI_SELECT_CHAIN", "selectionZone": "hand", "removalMode": "discard", "min": 0, "max": 3, "followUpAction": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_029": {
+        "id": "h_029",
+        "name": "Guiding Light",
+        "class": "guardian",
+        "abilityText": "Search the discard pile for a Hero card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": { "zone": "discard_pile", "cardType": "hero" },
+            "effects": [
+                { "action": "MOVE_CARD", "target": "selected", "destination": "hand" }
+            ]
+        }
+    },
+    "h_030": {
+        "id": "h_030",
+        "name": "Iron Resolve",
+        "class": "guardian",
+        "abilityText": "Cards you play cannot be challenged for the rest of your turn.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": true,
+            "effects": [
+                { "action": "APPLY_ROOM_FLAG", "flag": "blockAllChallenges", "duration": "END_OF_TURN", "target": "self" }
+            ]
+        }
+    },
+    "h_031": {
+        "id": "h_031",
+        "name": "Holy Curselifter",
+        "class": "guardian",
+        "abilityText": "Return a Cursed Item card equipped to a Hero card in your Party to your hand.",
+        "type": "hero",
+        "rollToPlay": 5,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "RETURN_CURSED_ITEM" }
+            ]
+        }
+    },
+    "h_032": {
+        "id": "h_032",
+        "name": "Mighty Blade",
+        "class": "guardian",
+        "abilityText": "Hero cards in your Party cannot be destroyed until your next turn.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": true,
+            "effects": [
+                { "action": "APPLY_PLAYER_MODIFIER", "modifierType": "blockHeroDestruction", "amount": 0, "duration": "UNTIL_NEXT_TURN" }
+            ]
+        }
+    },
+    "h_033": {
+        "id": "h_033",
+        "name": "Wise Shield",
+        "class": "guardian",
+        "abilityText": "+3 to all of your rolls until the end of your turn.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": true,
+            "effects": [
+                { "action": "APPLY_PLAYER_MODIFIER", "modifierType": "rollBonus", "amount": 3, "duration": "END_OF_TURN" }
+            ]
+        }
+    },
+    "h_034": {
+        "id": "h_034",
+        "name": "Calming Voice",
+        "class": "guardian",
+        "abilityText": "Hero cards in your Party cannot be stolen until your next turn.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": true,
+            "effects": [
+                { "action": "APPLY_PLAYER_MODIFIER", "modifierType": "blockSteal", "amount": 0, "duration": "UNTIL_NEXT_TURN" }
+            ]
+        }
+    },
+    "h_035": {
+        "id": "h_035",
+        "name": "Wiggles",
+        "class": "wizard",
+        "abilityText": "STEAL a Hero card and roll to use its effect immediately.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "STEAL_HERO", "rollAfter": true }
+            ]
+        }
+    },
+    "h_036": {
+        "id": "h_036",
+        "name": "Snowball",
+        "class": "wizard",
+        "abilityText": "DRAW a card. If it is a Magic card, you may play it immediately and DRAW a second card.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW_AND_CHECK", "amount": 1, "matchType": "magic", "then": "PLAY_MATCHED_DRAW" }
+            ]
+        }
+    },
+    "h_037": {
+        "id": "h_037",
+        "name": "Buttons",
+        "class": "wizard",
+        "abilityText": "Pull a card from another player's hand. If it is a Magic card, you may play it immediately.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 1, "mayPlayType": "magic" }
+            ]
+        }
+    },
+    "h_038": {
+        "id": "h_038",
+        "name": "Fluffy",
+        "class": "wizard",
+        "abilityText": "DESTROY 2 Hero cards.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DESTROY_HERO" },
+                { "action": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_039": {
+        "id": "h_039",
+        "name": "Whiskers",
+        "class": "wizard",
+        "abilityText": "STEAL a Hero card and DESTROY a Hero card.",
+        "type": "hero",
+        "rollToPlay": 11,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "STEAL_HERO" },
+                { "action": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_040": {
+        "id": "h_040",
+        "name": "Hopper",
+        "class": "wizard",
+        "abilityText": "Choose a player. That player must SACRIFICE a Hero card.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PROMPT_SACRIFICE", "target": "selected_player", "amount": 1, "cardType": "hero" }
+            ]
+        }
+    },
+    "h_041": {
+        "id": "h_041",
+        "name": "Tipsy Tootie",
+        "class": "bard",
+        "abilityText": "Choose a player. STEAL a Hero card from that player's Party and move this card to that player's Party.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "STEAL_HERO", "giveSelfAfter": true }
+            ]
+        }
+    },
+    "h_042": {
+        "id": "h_042",
+        "name": "Dodgy Dealer",
+        "class": "bard",
+        "abilityText": "Trade hands with another player.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "TRADE_HANDS" }
+            ]
+        }
+    },
+    "h_043": {
+        "id": "h_043",
+        "name": "Peanut",
+        "class": "bard",
+        "abilityText": "DRAW 2 cards.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW", "amount": 2, "target": "self" }
+            ]
+        }
+    },
+    "h_044": {
+        "id": "h_044",
+        "name": "Lucky Bucky",
+        "class": "bard",
+        "abilityText": "Pull a card from another player's hand. If that card is a Hero card, you may play it immediately.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 1, "mayPlayType": "hero" }
+            ]
+        }
+    },
+    "h_045": {
+        "id": "h_045",
+        "name": "Napping Nibbles",
+        "class": "bard",
+        "abilityText": "Do nothing.",
+        "type": "hero",
+        "rollToPlay": 2,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "NOOP" }
+            ]
+        }
+    },
+    "h_046": {
+        "id": "h_046",
+        "name": "Greedy Cheeks",
+        "class": "bard",
+        "abilityText": "Each other player must give you a card from their hand.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "GIVE_CARD", "target": "all_opponents" }
+            ]
+        }
+    },
+    "h_047": {
+        "id": "h_047",
+        "name": "Mellow Dee",
+        "class": "bard",
+        "abilityText": "DRAW a card. If that card is a Hero card, you may play it immediately.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW_AND_CHECK", "amount": 1, "matchType": "hero", "then": "PLAY_MATCHED" }
+            ]
+        }
+    },
+    "h_048": {
+        "id": "h_048",
+        "name": "Slippery Paws",
+        "class": "thief",
+        "abilityText": "Pull 2 cards from another player's hand, then DISCARD one of those cards.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 2, "discardOneAfter": true }
+            ]
+        }
+    },
+    "h_049": {
+        "id": "h_049",
+        "name": "Kit Napper",
+        "class": "thief",
+        "abilityText": "STEAL a Hero card.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "STEAL_HERO" }
+            ]
+        }
+    },
+    "h_050": {
+        "id": "h_050",
+        "name": "Shurikitty",
+        "class": "thief",
+        "abilityText": "DESTROY a Hero card. If that Hero card had an Item card equipped to it, add that Item card to your hand instead of moving it to the discard pile.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DESTROY_HERO", "itemDestination": "hand" }
+            ]
+        }
+    },
+    "h_051": {
+        "id": "h_051",
+        "name": "Sly Pickings",
+        "class": "thief",
+        "abilityText": "Pull a card from another player's hand. If that card is an Item card, you may play it immediately.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 1, "mayPlayType": "item" }
+            ]
+        }
+    },
+    "h_052": {
+        "id": "h_052",
+        "name": "Silent Shadow",
+        "class": "thief",
+        "abilityText": "Look at another player's hand. Choose a card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "TAKE_FROM_HAND", "target": "selected_player" }
+            ]
+        }
+    },
+    "h_053": {
+        "id": "h_053",
+        "name": "Plundering Puma",
+        "class": "thief",
+        "abilityText": "Pull 2 cards from another player's hand. That player may DRAW a card.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PULL_RANDOM", "count": 2, "targetMayDraw": true }
+            ]
+        }
+    },
+    "h_054": {
+        "id": "h_054",
+        "name": "Unbridled Fury",
+        "class": "berserker",
+        "abilityText": "DESTROY a Hero card. If that Hero card is a Berserker, you may spend an extra action point this turn.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DESTROY_HERO", "berserkerBonusAP": true }
+            ]
+        }
+    },
+    "h_055": {
+        "id": "h_055",
+        "name": "Rabid Beast",
+        "class": "berserker",
+        "abilityText": "SACRIFICE any number of cards, then DESTROY the same number of cards.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "MULTI_SELECT_CHAIN", "selectionZone": "party", "removalMode": "sacrifice", "min": 0, "followUpAction": "DESTROY_HERO" }
+            ]
+        }
+    },
+    "h_056": {
+        "id": "h_056",
+        "name": "Annihilator",
+        "class": "berserker",
+        "abilityText": "Search the discard pile for a Challenge card and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "targetRequirement": { "zone": "discard_pile", "cardType": "challenge" },
+            "effects": [
+                { "action": "MOVE_CARD", "target": "selected", "destination": "hand" }
+            ]
+        }
+    },
+    "h_057": {
+        "id": "h_057",
+        "name": "Roaryal Guard",
+        "class": "berserker",
+        "abilityText": "Choose a Class. Return every Hero card of that Class to its respective player's hand.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "RETURN_CLASS_TO_HAND" }
+            ]
+        }
+    },
+    "h_058": {
+        "id": "h_058",
+        "name": "Brawling Spirit",
+        "class": "berserker",
+        "abilityText": "Each player (including you) with more than 3 cards in their Party must SACRIFICE a card.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PROMPT_SACRIFICE", "target": "all_players", "amount": 1, "condition": { "type": "PARTY_SIZE_GT", "amount": 3 } }
+            ]
+        }
+    },
+    "h_059": {
+        "id": "h_059",
+        "name": "Gruesome Gladiator",
+        "class": "berserker",
+        "abilityText": "Look at each other player's hand. Choose a card from each player's hand and add it to your hand.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "TAKE_FROM_HAND", "target": "all_opponents" }
+            ]
+        }
+    },
+    "h_060": {
+        "id": "h_060",
+        "name": "Quick Draw",
+        "class": "ranger",
+        "abilityText": "DRAW 2 cards. If at least one of those cards is an Item card, you may play one of them immediately.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW_AND_CHECK", "amount": 2, "matchType": "item", "then": "PLAY_MATCHED" }
+            ]
+        }
+    },
+    "h_061": {
+        "id": "h_061",
+        "name": "Bullseye",
+        "class": "ranger",
+        "abilityText": "Look at the top 3 cards of the deck. Add one to your hand, then return the other two to the top of the deck in any order.",
+        "type": "hero",
+        "rollToPlay": 7,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PEEK_TOP_DECK", "amount": 3 }
+            ]
+        }
+    },
+    "h_062": {
+        "id": "h_062",
+        "name": "Wily Red",
+        "class": "ranger",
+        "abilityText": "DRAW cards until you have 7 cards in your hand.",
+        "type": "hero",
+        "rollToPlay": 10,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW_TO_HAND_SIZE", "amount": 7 }
+            ]
+        }
+    },
+    "h_063": {
+        "id": "h_063",
+        "name": "Hook",
+        "class": "ranger",
+        "abilityText": "Play an Item card from your hand immediately and DRAW a card.",
+        "type": "hero",
+        "rollToPlay": 6,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "PLAY_FROM_HAND", "cardType": "item", "target": "self" },
+                { "action": "DRAW", "amount": 1, "target": "self" }
+            ]
+        }
+    },
+    "h_064": {
+        "id": "h_064",
+        "name": "Wildshot",
+        "class": "ranger",
+        "abilityText": "DRAW 3 cards and DISCARD a card.",
+        "type": "hero",
+        "rollToPlay": 8,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DRAW", "amount": 3, "target": "self" },
+                { "action": "PROMPT_DISCARD", "target": "self", "amount": 1 }
+            ]
+        }
+    },
+    "h_065": {
+        "id": "h_065",
+        "name": "Serious Grey",
+        "class": "ranger",
+        "abilityText": "DESTROY a Hero card and DRAW a card.",
+        "type": "hero",
+        "rollToPlay": 9,
+        "activeSkill": {
+            "hasDuration": false,
+            "effects": [
+                { "action": "DESTROY_HERO" },
+                { "action": "DRAW", "amount": 1, "target": "self" }
             ]
         }
     }
