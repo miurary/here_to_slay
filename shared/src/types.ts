@@ -183,7 +183,7 @@ export interface CardTemplate {
   rollToPlay?: number;
   effect?: TemplateEffect;
   effects?: Effect[];
-  activeSkill?: { effects: Effect[]; costs?: Cost[] };
+  activeSkill?: { effects: Effect[]; costs?: Cost[]; targetRequirement?: { eligibility?: string; zone?: string; cardType?: string } };
   requirements?: Array<{ class: string; amount: number }>;
   trigger?: TemplateTrigger;
   slainEffect?: TemplateEffect;

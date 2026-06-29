@@ -2,14 +2,16 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
-AWS_REGION="us-east-1"
-ECS_CLUSTER="your-cluster"                        # TODO
-ECS_SERVICE="your-service"                        # TODO
-ALB_ARN="arn:aws:elasticloadbalancing:..."        # TODO
-WAF_WEBACL_ARN="arn:aws:wafv2:..."                # TODO
-CLOUDFRONT_DISTRIBUTION_ID="EXXXXXXXXXXXXX"       # TODO
-NAT_GATEWAY_ID="nat-xxxxxxxxxxxxxxxxx"            # TODO: leave blank to skip NAT teardown
-NAT_ROUTE_TABLE_ID="rtb-xxxxxxxxxxxxxxxxx"        # TODO: private subnet route table
+AWS_REGION="us-west-2"
+ECS_CLUSTER="wiggles-cluster"
+ECS_SERVICE="wiggles-task-service-xh5xjwiw"
+ALB_ARN="arn:aws:elasticloadbalancing:us-west-2:063418082823:loadbalancer/app/wiggles-alb/72b3295da747bb26"
+CLOUDFRONT_DISTRIBUTION_ID="EEESGFDKI1CIE"
+# NOTE: This deployment uses public subnets + an Internet Gateway (no NAT
+# gateway). An IGW is free and must not be torn down, so there is no NAT step.
+# The only WAF WebACL is CloudFront-scoped (CreatedByCloudFront-*); it is
+# attached to the distribution, so disabling CloudFront below covers it. The
+# ALB has no WebACL, so there is no WAF disassociate step.
 # ─────────────────────────────────────────────────────────────────────────────
 
 STATE_FILE=".service-state.json"
@@ -29,27 +31,15 @@ DESIRED=$(aws ecs describe-services \
   --query 'services[0].desiredCount' \
   --output text)
 
-# ── 2. Snapshot NAT Gateway EIP (so we can reuse it on start) ────────────────
-NAT_EIP_ALLOC=""
-if [[ -n "$NAT_GATEWAY_ID" ]]; then
-  echo "==> Reading NAT Gateway EIP allocation..."
-  NAT_EIP_ALLOC=$(aws ec2 describe-nat-gateways \
-    --nat-gateway-ids "$NAT_GATEWAY_ID" \
-    --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
-    --output text)
-fi
-
 # ── Save state ────────────────────────────────────────────────────────────────
 echo "==> Saving state to $STATE_FILE..."
 cat > "$STATE_FILE" <<EOF
 {
-  "ecs_desired_count": $DESIRED,
-  "nat_eip_alloc": "$NAT_EIP_ALLOC",
-  "nat_route_table_id": "$NAT_ROUTE_TABLE_ID"
+  "ecs_desired_count": $DESIRED
 }
 EOF
 
-# ── 3. Scale ECS to 0 ─────────────────────────────────────────────────────────
+# ── 2. Scale ECS to 0 ─────────────────────────────────────────────────────────
 echo "==> Scaling ECS service to 0 tasks..."
 aws ecs update-service \
   --region "$AWS_REGION" \
@@ -58,13 +48,7 @@ aws ecs update-service \
   --desired-count 0 \
   --output text --query 'service.serviceName'
 
-# ── 4. Disassociate WAF from ALB ──────────────────────────────────────────────
-echo "==> Disassociating WAF WebACL from ALB..."
-aws wafv2 disassociate-web-acl \
-  --resource-arn "$ALB_ARN" \
-  --region "$AWS_REGION"
-
-# ── 5. Disable CloudFront distribution ───────────────────────────────────────
+# ── 3. Disable CloudFront distribution ───────────────────────────────────────
 echo "==> Disabling CloudFront distribution $CLOUDFRONT_DISTRIBUTION_ID..."
 CF_ETAG=$(aws cloudfront get-distribution-config \
   --id "$CLOUDFRONT_DISTRIBUTION_ID" \
@@ -81,22 +65,10 @@ aws cloudfront update-distribution \
   --output text --query 'Distribution.Id'
 echo "    CloudFront disable initiated — takes 15-20 min to fully propagate."
 
-# ── 6. Delete NAT Gateway ─────────────────────────────────────────────────────
-# The EIP is NOT released on deletion, so start.sh can reuse it.
-if [[ -n "$NAT_GATEWAY_ID" ]]; then
-  echo "==> Deleting NAT Gateway $NAT_GATEWAY_ID (EIP $NAT_EIP_ALLOC retained)..."
-  aws ec2 delete-nat-gateway \
-    --nat-gateway-id "$NAT_GATEWAY_ID" \
-    --output text --query 'NatGatewayId'
-  echo "    NAT Gateway deletion initiated (~60 sec). Private subnet outbound will fail once complete."
-fi
-
 echo ""
 echo "==> Done. What was stopped:"
 echo "    [x] ECS tasks scaled to 0 (was $DESIRED)"
-echo "    [x] WAF WebACL disassociated from ALB"
-echo "    [x] CloudFront distribution disabled"
-[[ -n "$NAT_GATEWAY_ID" ]] && echo "    [x] NAT Gateway deleted (~\$0.045/hr saved)"
+echo "    [x] CloudFront distribution disabled (its WAF goes inactive with it)"
 echo ""
 echo "    Note: The ALB still accrues a small fixed charge (~\$0.008/hr) while it exists."
 echo "    Run ./start.sh to restore all services."
