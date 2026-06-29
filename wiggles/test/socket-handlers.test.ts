@@ -18,6 +18,7 @@ const connect = (h: Harness, id: string): FakeSocket => {
   return h.socket(id);
 };
 
+// eslint-disable-next-line
 const lastOf = (s: FakeSocket, event: string): any => {
   const es = s.emittedOf(event);
   return (es[es.length - 1] as EmittedEvent | undefined)?.args[0];
