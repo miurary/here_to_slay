@@ -1,7 +1,7 @@
 // effects.ts — extracted from the original monolithic server.ts.
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import {

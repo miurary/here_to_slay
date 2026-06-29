@@ -1,9 +1,7 @@
 // challenges.ts — extracted from the original monolithic server.ts.
 import type {
-  ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  CardTemplate, GameState,
 } from '../../shared/src/types.js';
-import type { Socket } from 'socket.io';
 import { getSocketByPlayerId, getIo, pendingChallenges, markHeroPlayedFromAbility } from './state.js';
 import type { PendingChallengeState } from './state.js';
 import { getHeroEffectiveClass, moveCardBetweenZones, applyWinIfMet } from './util.js';

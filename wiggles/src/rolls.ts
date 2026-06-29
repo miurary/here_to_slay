@@ -2,7 +2,7 @@
 import { roll2d6 } from './dice.js';
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  CardInstance, CardTemplate, Effect, GameState, Player, PlayerState,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import { getSocketByPlayerId, modifierPhases } from './state.js';

@@ -7,7 +7,7 @@ vi.mock('../src/dice.js', () => ({ roll2d6: () => dice.next, rollDie: () => dice
 import { startServer, stopServer, createRoom, connect, type TestClient } from './integration-helpers.js';
 import { getRoomState } from '../src/state.js';
 import { makeCard, makeMonster } from './harness.js';
-import type { GameState } from '../../shared/src/types.js';
+import type { AbilityPrompt, AbilityPromptOption, GameState } from '../../shared/src/types.js';
 
 let port: number;
 const open: TestClient[] = [];
@@ -37,7 +37,7 @@ const setupInProgress = async () => {
   return { roomCode, gs, a, b };
 };
 
-const promptOption = (prompt: any, match: (o: any) => boolean) => prompt.options.find(match)?.id as string;
+const promptOption = (prompt: AbilityPrompt, match: (o: AbilityPromptOption) => boolean) => prompt.options.find(match)?.id as string;
 
 describe('integration — full lobby lifecycle over real sockets', () => {
   it('drives connect → startGame → rolls → leader selection → in_progress', async () => {
@@ -170,8 +170,8 @@ describe('integration — ability prompt round-trips', () => {
     gs.players[a.id]!.zones.party = [badAxe];
     gs.players[b.id]!.zones.party = [victim];
     a.emit('activateHeroAbility', badAxe.instanceId);
-    const [prompt] = await a.waitEvent('abilityPrompt') as [any];
-    a.emit('respondToAbilityPrompt', prompt.promptId, promptOption(prompt, (o: any) => o.id === victim.instanceId));
+    const [prompt] = await a.waitEvent('abilityPrompt') as [AbilityPrompt];
+    a.emit('respondToAbilityPrompt', prompt.promptId, promptOption(prompt, (o: AbilityPromptOption) => o.id === victim.instanceId));
     // Wait on a post-destroy condition (victim in discard), not party emptiness —
     // the party was already empty in the connect-time broadcast.
     const st = await a.waitState(g => g.discardPile.some(c => c.instanceId === victim.instanceId));
@@ -186,9 +186,9 @@ describe('integration — ability prompt round-trips', () => {
     gs.players[a.id]!.zones.hand = [spell, filler];
     gs.players[b.id]!.zones.party = [victim];
     a.emit('playMagic', spell.instanceId);
-    const [discardPrompt] = await a.waitEvent('abilityPrompt') as [any];
+    const [discardPrompt] = await a.waitEvent('abilityPrompt') as [AbilityPrompt];
     a.emit('respondToAbilityPrompt', discardPrompt.promptId, filler.instanceId);
-    const [destroyPrompt] = await a.waitEvent('abilityPrompt') as [any];
+    const [destroyPrompt] = await a.waitEvent('abilityPrompt') as [AbilityPrompt];
     a.emit('respondToAbilityPrompt', destroyPrompt.promptId, victim.instanceId);
     await a.waitState(g => g.discardPile.some(c => c.instanceId === victim.instanceId));
   });
@@ -232,8 +232,8 @@ describe('integration — party leader ability', () => {
     gs.players[a.id]!.partyLeaderId = 'p_006';
     gs.players[b.id]!.zones.hand = [makeCard('s_001')];
     a.emit('usePartyLeaderAbility');
-    const [prompt] = await a.waitEvent('abilityPrompt') as [any];
-    a.emit('respondToAbilityPrompt', prompt.promptId, prompt.options[0].id);
+    const [prompt] = await a.waitEvent('abilityPrompt') as [AbilityPrompt];
+    a.emit('respondToAbilityPrompt', prompt.promptId, prompt.options[0]?.id);
     const st = await a.waitState(g => g.players[a.id]!.zones.hand.length === 1);
     expect(st.players[b.id]!.zones.hand).toHaveLength(0);
   });

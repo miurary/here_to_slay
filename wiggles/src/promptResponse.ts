@@ -1,13 +1,12 @@
 // promptResponse.ts — extracted from the original monolithic server.ts.
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  Effect,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import {
   abilityPromptRequests, getRoomState, emitAbilityPrompt, emitAbilityResolution, buildPromptId,
 } from './state.js';
-import type { AbilityPromptOption } from './state.js';
 import { getPlayerBySocketId, findHeroInPlayerParty, moveCardBetweenZones } from './util.js';
 import { drawCards } from './cards.js';
 import { processHeroAbilityEffects, tryDecoyDollRedirect, triggerSlainMonsterPassive } from './effects.js';

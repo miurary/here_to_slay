@@ -1,7 +1,7 @@
 // magic.ts — extracted from the original monolithic server.ts.
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  Effect, GameState, Player,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import { emitAbilityPrompt, buildPromptId } from './state.js';
