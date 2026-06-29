@@ -34,7 +34,6 @@ export default function PartyCard({
                     .filter((card) => card.cardType === 'hero')
                     .map((card) => {
                     const template = gameState.cardTemplates[card.templateId];
-                    const rollToPlay = template?.rollToPlay as number | undefined;
                     const equippedTemplate = getTemplateForInstanceId(gameState, card.equippedItem);
                     return (
                         <div
@@ -49,14 +48,7 @@ export default function PartyCard({
                         className={`card ${selectedHeroId === card.instanceId ? 'cardSelected' : ''} ${card.cardType === 'hero' ? 'cardHero' : ''}`}
                         style={{ padding: '0.75rem', border: '1px solid #333', borderRadius: '6px', backgroundColor: '#f7f7ff', cursor: isMyTurn ? 'pointer' : 'not-allowed' }}
                         >
-                        <CardArt cardId={card.templateId} name={template?.name || card.templateId} style={{ marginBottom: '0.4rem' }} />
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#666' }}>{template?.class || 'Hero'}</div>
-                        {rollToPlay !== undefined && (
-                            <div style={{ fontSize: '0.75rem', color: '#444', marginTop: '0.5rem' }}>
-                            Roll to use: +{rollToPlay}
-                            </div>
-                        )}
+                        <CardArt cardId={card.templateId} name={template?.name || card.templateId} />
                         {card.equippedItem && (
                             <div style={{ marginTop: '0.5rem' }}>
                             <div style={{ fontSize: '0.75rem', color: '#333' }}>

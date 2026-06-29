@@ -1,5 +1,5 @@
 import type { GameState } from '../../../../shared/types';
-import { getCardTypeLabel } from '../../utils/gameUtils';
+import CardArt from '../CardArt';
 
 interface PartyLeaderReviewCardProps {
     gameState: GameState;
@@ -23,9 +23,7 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue 
                     <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{player.username || 'Player'}</div>
                     {chosen ? (
                         <>
-                        <div style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>{template?.name || chosen.templateId}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#666' }}>{getCardTypeLabel(chosen, template)}</div>
-                        <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#333' }}>{(template?.abilityText as string) || 'No ability text available.'}</div>
+                        <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                         </>
                     ) : (
                         <div style={{ color: '#999' }}>No party leader chosen</div>
@@ -39,34 +37,9 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue 
                 <div style={{ display: 'flex', gap: '0.75rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
                 {gameState.activeMonsters.map((monster) => {
                     const template = gameState.cardTemplates[monster.templateId];
-                    const requirements = (template?.requirements as Array<{ class?: string; amount?: number }> | undefined) ?? [];
-                    const requirementText = requirements.length > 0
-                    ? requirements.map((req) => `${req.amount ?? '?'} ${req.class ?? 'Any'}`).join(', ')
-                    : 'No requirements';
-                    const lowerBound = template?.lowerBound as number | undefined;
-                    const lowerBoundText = template?.lowerBoundText as string | undefined;
-                    const upperBound = template?.upperBound as number | undefined;
-                    const upperBoundText = template?.upperBoundText as string | undefined;
-                    const slainEffectText = template?.slainEffectText as string | undefined;
-
                     return (
-                    <div key={monster.instanceId} style={{ flex: '1 1 0', minWidth: '220px', padding: '0.75rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{template?.name || monster.templateId}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.75rem' }}>{requirementText}</div>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                        <span style={{ fontWeight: 'bold' }}>{lowerBound !== undefined ? `${lowerBound}-` : 'Lower:'}</span>
-                        <span style={{ fontSize: '0.85rem', color: '#333' }}>{lowerBoundText ?? 'No lower bound text'}</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                        <span style={{ fontWeight: 'bold' }}>{upperBound !== undefined ? `${upperBound}+` : 'Upper:'}</span>
-                        <span style={{ fontSize: '0.85rem', color: '#333' }}>{upperBoundText ?? 'No upper bound text'}</span>
-                        </div>
-                        {slainEffectText && (
-                        <div style={{ marginTop: '0.5rem', padding: '0.75rem', borderRadius: '6px', backgroundColor: '#f8f0ff', color: '#333' }}>
-                            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Slain Effect</div>
-                            <div style={{ fontSize: '0.8rem' }}>{slainEffectText}</div>
-                        </div>
-                        )}
+                    <div key={monster.instanceId} style={{ padding: '0.5rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
+                        <CardArt cardId={monster.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                     </div>
                     );
                 })}

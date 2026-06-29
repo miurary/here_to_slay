@@ -1,5 +1,6 @@
 import type { GameState } from "../../../../shared/types";
-import { getCardTypeLabel, getTemplateForInstanceId } from "../../utils/gameUtils";
+import { getTemplateForInstanceId } from "../../utils/gameUtils";
+import CardArt from "../CardArt";
 import type { Dispatch, SetStateAction } from 'react';
 
 interface OpponentInformationCardProps {
@@ -28,8 +29,7 @@ export default function OpponentInformationCard({ gameState, myId, selectedOppon
                         <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
                         {chosen ? (
                             <>
-                            <div style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>{template?.name || chosen.templateId}</div>
-                            <div style={{ fontSize: '0.8rem', color: '#666' }}>{getCardTypeLabel(chosen, template)}</div>
+                            <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0.25rem 0' }} />
                             </>
                         ) : (
                             <div style={{ color: '#999' }}>No leader chosen</div>
@@ -69,19 +69,10 @@ export default function OpponentInformationCard({ gameState, myId, selectedOppon
                 {gameState.players[selectedOpponentPartyId].zones.party.length > 0 ? (
                     gameState.players[selectedOpponentPartyId].zones.party.map((card) => {
                     const template = gameState.cardTemplates[card.templateId];
-                    const abilityText = (template?.abilityText as string) || '';
-                    const rollToPlay = template?.rollToPlay as number | undefined;
                     const equippedTemplate = getTemplateForInstanceId(gameState, card.equippedItem);
                     return (
                         <div key={card.instanceId} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: 'white' }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{template?.name || card.templateId}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>{getCardTypeLabel(card, template)}</div>
-                        {abilityText && (
-                            <div style={{ fontSize: '0.8rem', color: '#333', marginBottom: '0.5rem' }}>{abilityText}</div>
-                        )}
-                        {rollToPlay !== undefined && (
-                            <div style={{ fontSize: '0.8rem', color: '#333' }}>Roll to play: +{rollToPlay}</div>
-                        )}
+                        <CardArt cardId={card.templateId} name={template?.name} style={{ margin: '0 auto 0.4rem' }} />
                         {card.equippedItem && (
                             <div style={{ marginTop: '0.5rem' }}>
                             <div style={{ fontSize: '0.85rem', color: '#333' }}>
