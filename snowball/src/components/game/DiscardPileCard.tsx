@@ -1,4 +1,5 @@
 import type { GameState } from "../../../../shared/types";
+import CardArt from "../CardArt";
 
 interface DiscardPileCardProps {
   gameState: GameState | null;
@@ -30,11 +31,11 @@ export default function DiscardPileCard({ gameState, showDiscardPile, setShowDis
           <div style={{ backgroundColor: 'white', padding: '1rem', borderRadius: '12px', width: 'min(90vw, 640px)', maxHeight: '80vh', overflowY: 'auto' }}>
             <h3 style={{ marginTop: 0 }}>Discard Pile</h3>
             {gameState.discardPile.length === 0 && <div>No cards in discard pile</div>}
-            <ul>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'flex-start' }}>
               {gameState.discardPile.map((card) => (
-                <li key={card.instanceId} style={{ marginBottom: '0.5rem' }}>{gameState.cardTemplates[card.templateId]?.name || card.templateId} ({card.cardType})</li>
+                <CardArt key={card.instanceId} cardId={card.templateId} name={gameState.cardTemplates[card.templateId]?.name} />
               ))}
-            </ul>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
               <button onClick={() => setShowDiscardPile(false)} style={{ padding: '0.5rem 1rem' }}>Close</button>
             </div>

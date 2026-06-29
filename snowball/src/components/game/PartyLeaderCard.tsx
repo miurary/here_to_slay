@@ -1,5 +1,4 @@
 import type { GameState } from '../../../../shared/types';
-import { getCardTypeLabel } from '../../utils/gameUtils';
 import CardArt from '../CardArt';
 
 interface PartyLeaderCardProps {
@@ -16,7 +15,6 @@ export default function PartyLeaderCard({ gameState, myId, isMyTurn, onUsePartyL
 
     const template = gameState.cardTemplates[partyLeaderCard.templateId];
     const cardName = template?.name || partyLeaderCard.templateId;
-    const abilityText = (template?.abilityText as string) || '';
     const isOptional = template?.effect?.isOptional === true;
     const alreadyUsed = partyLeaderCard.effectUsedThisTurn;
     const canUse = isMyTurn && isOptional && !alreadyUsed;
@@ -25,11 +23,6 @@ export default function PartyLeaderCard({ gameState, myId, isMyTurn, onUsePartyL
         <div style={{ width: '100%', boxSizing: 'border-box', padding: '1rem', border: '2px solid #333', borderRadius: '8px', backgroundColor: '#faf7f0' }}>
             <h3 style={{ marginTop: 0 }}>Your Party Leader</h3>
             <CardArt cardId={partyLeaderCard.templateId} name={cardName} style={{ marginBottom: '0.5rem' }} />
-            <div style={{ fontSize: '1rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>{cardName}</div>
-            <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem' }}>{getCardTypeLabel(partyLeaderCard, template)}</div>
-            {abilityText && (
-                <div style={{ fontSize: '0.8rem', color: '#333', lineHeight: '1.4', marginBottom: '0.75rem' }}>{abilityText}</div>
-            )}
             {isOptional ? (
                 <>
                     <div style={{

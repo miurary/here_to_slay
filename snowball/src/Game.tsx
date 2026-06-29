@@ -7,6 +7,7 @@ import './App.css';
 import FirstRollCard from './components/game/FirstRollCard';
 import GameStatusCard from './components/game/GameStatusCard';
 import HandCard from './components/game/HandCard';
+import HeroAbilityModal from './components/game/HeroAbilityModal';
 import PartyCard from './components/game/PartyCard';
 import PartyLeaderCard from './components/game/PartyLeaderCard';
 import PartyLeaderSelectionCard from './components/game/PartyLeaderSelectionCard';
@@ -189,6 +190,8 @@ export default function Game() {
       setHeroRollResult(null);
       setPlayHeroPromptOpen(true);
       setPlayHeroRollResult(null);
+      // The ability prompt is now its own modal: close the hand so it takes over.
+      setShowHand(false);
     });
 
     client.on('challengeResolved', (data: ChallengeResolvedData) => {
@@ -310,6 +313,20 @@ export default function Game() {
     setPendingHeroPlayId(null);
     setPendingHeroAbilityActivationId(null);
     setPlayHeroPromptOpen(false);
+    setSelectedHeroId(null);
+    setSelectedHeroLocation(null);
+  };
+
+  // Fully dismiss the standalone hero-ability modal (post-play roll prompt or a
+  // party hero's ability) and clear the related selection state.
+  const closeHeroAbilityModal = () => {
+    setPlayHeroPromptOpen(false);
+    setPendingHeroPlayId(null);
+    setPendingHeroAbilityActivationId(null);
+    setPlayHeroRollResult(null);
+    setHeroRollResult(null);
+    setSelectedHeroId(null);
+    setSelectedHeroLocation(null);
   };
 
   const handleActivateHeroAbility = (heroInstanceId: string) => {
@@ -503,6 +520,11 @@ export default function Game() {
 
   const isInGame = !!(gameState && gameState.status === 'in_progress' && gameState.players[myId]);
 
+  // The hero-ability modal opens for a just-played hero (offer to roll) or for a
+  // selected party hero — independently of whether the hand modal is open.
+  const heroAbilityModalOpen = isInGame && !!selectedHero && (playHeroPromptOpen || selectedHeroLocation === 'party');
+  const heroAbilityMode: 'play' | 'party' = playHeroPromptOpen ? 'play' : 'party';
+
   return (
     <div className="gameShell" onClick={() => setSelectedHeroId(null)}>
       <style>{`@keyframes spin {0% { transform: rotateX(0deg) rotateY(0deg); }100% { transform: rotateX(360deg) rotateY(360deg); }}`}</style>
@@ -531,20 +553,32 @@ export default function Game() {
               pendingHeroPlayId={pendingHeroPlayId}
               selectedHero={selectedHero}
               selectedHeroLocation={selectedHeroLocation}
-              heroRollResult={heroRollResult}
               playHeroPromptOpen={playHeroPromptOpen}
-              isHeroRolling={isHeroRolling}
               selectedHeroAP={selectedHeroAP}
-              handlePlayHeroRoll={handlePlayHeroRoll}
-              handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
-              handleRollHeroAbility={handleRollHeroAbility}
-              handleActivateHeroAbility={handleActivateHeroAbility}
-              pendingHeroAbilityActivationId={pendingHeroAbilityActivationId}
-              playHeroRollResult={playHeroRollResult}
               isMyTurn={isMyTurn}
             />
           </div>
         </div>
+      )}
+
+      {heroAbilityModalOpen && selectedHero && gameState && (
+        <HeroAbilityModal
+          key={`${selectedHero.instanceId}-${heroAbilityMode}`}
+          gameState={gameState}
+          hero={selectedHero}
+          mode={heroAbilityMode}
+          isMyTurn={isMyTurn}
+          isHeroRolling={isHeroRolling}
+          modifierPhaseActive={!!gameState.modifierPhase && gameState.modifierPhase.rollingPlayerId === myId}
+          playHeroRollResult={playHeroRollResult}
+          handlePlayHeroRoll={handlePlayHeroRoll}
+          handleSkipPlayHeroRoll={handleSkipPlayHeroRoll}
+          heroRollResult={heroRollResult}
+          handleRollHeroAbility={handleRollHeroAbility}
+          pendingHeroAbilityActivationId={pendingHeroAbilityActivationId}
+          handleActivateHeroAbility={handleActivateHeroAbility}
+          onClose={closeHeroAbilityModal}
+        />
       )}
 
       <div onClick={(e) => e.stopPropagation()}>

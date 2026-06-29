@@ -1,4 +1,5 @@
 import type { CardInstance, CardTemplate, GameState, PlayerState } from "../../../../shared/types";
+import CardArt from "../CardArt";
 
 interface ActiveMonstersSidebarCardProps {
     gameState: GameState;
@@ -61,11 +62,6 @@ export default function ActiveMonstersSidebarCard({
             <div style={{ display: 'grid', gap: '0.75rem' }}>
                 {gameState.activeMonsters.map((monster) => {
                     const template = gameState.cardTemplates[monster.templateId];
-                    const lowerBound = template?.lowerBound;
-                    const lowerBoundText = template?.lowerBoundText;
-                    const upperBound = template?.upperBound;
-                    const upperBoundText = template?.upperBoundText;
-                    const slainEffectText = template?.slainEffectText;
                     const isSelected = selectedMonsterId === monster.instanceId;
 
                     const reqResult = myPlayer
@@ -87,20 +83,7 @@ export default function ActiveMonstersSidebarCard({
                                 cursor: 'pointer',
                             }}
                         >
-                            <div style={{ fontWeight: 'bold', marginBottom: '0.35rem' }}>{template?.name || monster.templateId}</div>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                                <span style={{ fontWeight: 'bold', fontSize: '0.85rem' }}>{lowerBound !== undefined ? `<${lowerBound}:` : 'Low:'}</span>
-                                <span style={{ fontSize: '0.8rem', color: '#c00' }}>{lowerBoundText ?? '—'}</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <span style={{ fontWeight: 'bold', fontSize: '0.85rem' }}>{upperBound !== undefined ? `${upperBound}+:` : 'High:'}</span>
-                                <span style={{ fontSize: '0.8rem', color: '#28a745' }}>{upperBoundText ?? '—'}</span>
-                            </div>
-                            {slainEffectText && (
-                                <div style={{ padding: '0.4rem 0.6rem', borderRadius: '6px', backgroundColor: '#fff8e1', fontSize: '0.75rem', color: '#555', marginBottom: '0.5rem' }}>
-                                    <strong>If slain:</strong> {slainEffectText}
-                                </div>
-                            )}
+                            <CardArt cardId={monster.templateId} name={template?.name} style={{ margin: '0 auto 0.5rem' }} />
 
                             {isSelected && myPlayer && (
                                 <div

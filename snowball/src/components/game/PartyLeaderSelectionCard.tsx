@@ -1,4 +1,5 @@
 import type { GameState } from '../../../../shared/types';
+import CardArt from '../CardArt';
 
 interface UsernameCardProps {
     gameState: GameState;
@@ -45,7 +46,7 @@ export default function PartyLeaderSelectionCard({ gameState, myId, handleChoose
         </div>
         <div>
             <h4>Chosen Party Leaders</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.75rem' }}>
             {Object.values(gameState.players).map((player) => {
                 const chosen = player.zones.party[0];
                 const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
@@ -53,10 +54,7 @@ export default function PartyLeaderSelectionCard({ gameState, myId, handleChoose
                 <div key={player.id} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
                     {chosen ? (
-                    <>
-                        <div style={{ fontSize: '0.9rem' }}>{template?.name || chosen.templateId}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#666' }}>{(template?.abilityText as string) || ''}</div>
-                    </>
+                        <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                     ) : (
                     <div style={{ color: '#999' }}>Not chosen yet</div>
                     )}

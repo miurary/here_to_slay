@@ -1,0 +1,29 @@
+name: Build Snowball
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-snowball:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./snowball
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          cache-dependency-path: ./snowball/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build snowball
+        run: npm run build
+
+        
+
