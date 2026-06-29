@@ -5,7 +5,7 @@ import {
   createHarness, resetEngineState, buildGameState, buildPlayer, makeCard, makeMonster,
   type Harness,
 } from './harness.js';
-import type { GameState, PlayerState } from '../../shared/src/types.js';
+import type { GameState } from '../../shared/src/types.js';
 
 beforeEach(() => resetEngineState());
 
@@ -24,9 +24,6 @@ const respondMulti = (h: Harness, gs: GameState, responderId: string, optionIds:
   const prompt = h.socket(responderId).lastPrompt();
   handleMultiPromptResponse(h.socket(responderId) as never, prompt.promptId, optionIds, h.sendRoomUpdate);
 };
-
-const findHero = (p: PlayerState, templateId: string) =>
-  p.zones.party.find(c => c.templateId === templateId)!;
 
 describe('hero active skills — effect resolution', () => {
   it('h_043 Peanut: DRAW 2 puts two main-deck cards into the caster hand', () => {

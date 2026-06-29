@@ -7,7 +7,6 @@
  * in-memory GameState and then assert on (a) the mutated GameState and (b) the
  * events captured per socket / per room broadcast.
  */
-import { randomUUID } from 'node:crypto';
 import {
   setIo,
   abilityPromptRequests,

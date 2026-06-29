@@ -9,7 +9,6 @@ import {
   createHarness, resetEngineState, buildGameState, buildPlayer, makeCard, makeMonster,
   type Harness, type FakeSocket, type EmittedEvent,
 } from './harness.js';
-import type { GameState } from '../../shared/src/types.js';
 
 beforeEach(() => { resetEngineState(); dice.next = [3, 3]; });
 

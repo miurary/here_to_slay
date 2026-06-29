@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import type { Server } from 'socket.io';
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance, PlayerState,
+  CardInstance, Effect, GameState,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 
