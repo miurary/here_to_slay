@@ -104,7 +104,7 @@
     },
     "p_008": {
         "id": "p_008",
-        "name": "The Gnawing Dead",
+        "name": "The Gnawing Dread",
         "class": "necromancer",
         "abilityText": "Once per turn on your turn, you may spend 2 action points to search the discard pile for a card and add it to your hand.",
         "type": "party_leader",

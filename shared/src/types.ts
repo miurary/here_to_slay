@@ -101,6 +101,7 @@ export interface ClientToServerEvents {
   drawFromMain: () => void;
   endTurn: () => void;
   quitGame: () => void;
+  sendChat: (message: string) => void;
 }
 
 export interface ServerToClientEvents {
@@ -245,6 +246,23 @@ export interface GameState {
   winnerId?: string;
   roomFlags?: Record<string, boolean>;
   forceEndTurn?: string;
+  /** Ordered feed of chat messages and action log entries, oldest first. */
+  gameLog: LogEntry[];
+}
+
+/** A single entry in the combined chat + action-log feed. */
+export interface LogEntry {
+  id: string;
+  /** Epoch millis when the entry was created. */
+  ts: number;
+  /** 'chat' = a player message; 'action' = something a player did; 'system' = game events. */
+  kind: 'chat' | 'action' | 'system';
+  /** The acting/speaking player's id, when applicable. */
+  playerId?: string;
+  /** Display name captured at log time (players can leave). */
+  username?: string;
+  /** The message text (chat) or human-readable action description. */
+  text: string;
 }
 // need to fix clanker code
 export type Player = PlayerState;

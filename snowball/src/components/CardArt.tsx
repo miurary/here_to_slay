@@ -9,6 +9,12 @@ interface CardArtProps {
   className?: string;
   /** Extra style (e.g. margins). Width is owned by CardArt and should not be overridden. */
   style?: CSSProperties;
+  /**
+   * When true, the art fills its container and scales to fit (object-fit:
+   * contain) instead of using a fixed per-class width. The parent must give it
+   * a bounded box. Useful for height-constrained layouts.
+   */
+  fit?: boolean;
 }
 
 /**
@@ -27,14 +33,14 @@ interface CardArtProps {
 const STANDARD_WIDTH = 132;
 const LARGE_WIDTH = 192;
 
-export default function CardArt({ cardId, name, className, style }: CardArtProps) {
+export default function CardArt({ cardId, name, className, style, fit }: CardArtProps) {
   const [failed, setFailed] = useState(false);
   const isLarge = cardId.startsWith('m_') || cardId.startsWith('p_');
   const width = isLarge ? LARGE_WIDTH : STANDARD_WIDTH;
   const aspectRatio = isLarge ? '7 / 12' : '5 / 7';
 
   const baseStyle: CSSProperties = {
-    width,
+    ...(fit ? { width: '100%', height: '100%', objectFit: 'contain' } : { width }),
     borderRadius: 8,
     display: 'block',
     ...style,
@@ -70,7 +76,7 @@ export default function CardArt({ cardId, name, className, style }: CardArtProps
       src={`/cards/${cardId}.png`}
       alt={name ?? cardId}
       className={className}
-      style={{ ...baseStyle, height: 'auto' }}
+      style={fit ? baseStyle : { ...baseStyle, height: 'auto' }}
       onError={() => setFailed(true)}
     />
   );

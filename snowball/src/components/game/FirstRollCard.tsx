@@ -1,4 +1,5 @@
 import type { GameState } from '../../../../shared/types';
+import DiceRoll from './DiceRoll';
 
 interface FirstRollCardProps {
     gameState: GameState;
@@ -44,11 +45,16 @@ export default function FirstRollCard({ gameState, myId, handleRoll, isRolling, 
                 Waiting for {gameState.currentRollerId ? gameState.players[gameState.currentRollerId]?.username : 'a player'} to roll...
                 </p>
             )}
-            {isRolling && (
-                <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 0.1s infinite' }}>
-                🎲 🎲
-                </div>
-            )}
+            {(isRolling || myRoll !== null) && (() => {
+                // Derive a face pair that sums to the rolled total for the settle.
+                const d1 = myRoll !== null ? Math.min(6, Math.max(1, myRoll - 1)) : undefined;
+                const d2 = myRoll !== null && d1 !== undefined ? myRoll - d1 : undefined;
+                return (
+                    <div style={{ marginBottom: '1rem' }}>
+                        <DiceRoll rolling={isRolling} die1={d1} die2={d2} size={48} />
+                    </div>
+                );
+            })()}
             <div style={{ marginTop: '1.5rem' }}>
                 <h4>Roll Results:</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem' }}>
@@ -67,7 +73,6 @@ export default function FirstRollCard({ gameState, myId, handleRoll, isRolling, 
                 )}
                 </div>
             </div>
-            <style>{`@keyframes spin {0% { transform: rotateX(0deg) rotateY(0deg); }100% { transform: rotateX(360deg) rotateY(360deg); }}`}</style>
         </div>
     );
 }

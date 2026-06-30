@@ -111,6 +111,7 @@ export const buildGameState = (input: BuildStateInput): GameState => {
     currentRollerId: undefined,
     firstPlayerId: undefined,
     targetMonstersToWin: input.targetMonstersToWin,
+    gameLog: [],
     ...(input.roomFlags ? { roomFlags: input.roomFlags } : {}),
   };
 };

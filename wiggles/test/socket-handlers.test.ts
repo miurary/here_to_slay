@@ -50,6 +50,7 @@ describe('drawFromMain', () => {
     connect(h, 'p1').fire('drawFromMain');
     expect(gs.players['p1']!.zones.hand).toHaveLength(1);
     expect(gs.players['p1']!.actionPoints).toBe(2);
+    expect(gs.gameLog.some(e => e.kind === 'action' && e.playerId === 'p1' && /drew a card/i.test(e.text))).toBe(true);
   });
 
   it('rejects drawing when it is not your turn', () => {
@@ -69,6 +70,7 @@ describe('playHero', () => {
     connect(h, 'p1').fire('playHero', hero.instanceId);
     expect(gs.players['p1']!.zones.party.map(c => c.instanceId)).toContain(hero.instanceId);
     expect(gs.players['p1']!.actionPoints).toBe(2);
+    expect(gs.gameLog.some(e => e.kind === 'action' && e.playerId === 'p1' && /played /i.test(e.text))).toBe(true);
   });
 
   it('opens a challenge window when an opponent holds a challenge card', () => {
@@ -109,6 +111,48 @@ describe('attackMonster', () => {
     connect(h, 'p1').fire('attackMonster', monster.instanceId);
     expect(lastOf(h.socket('p1'), 'actionFailed')).toMatch(/Requirements not met/i);
     expect(gs.players['p1']!.actionPoints).toBe(3); // not charged
+  });
+
+  it('logs a slain result to the game log on a strong roll', () => {
+    const monster = makeMonster('m_007'); // upper 10, requires 1 hero
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')], actionPoints: 3 }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    dice.next = [6, 6]; // 12 >= 10
+    connect(h, 'p1').fire('attackMonster', monster.instanceId);
+    const slain = gs.gameLog.filter(e => e.kind === 'action' && /slew/i.test(e.text));
+    expect(slain).toHaveLength(1);
+    expect(slain[0]!.text).toMatch(/^p1 slew /); // harness sets username to the socket id
+    expect(slain[0]!.playerId).toBe('p1');
+  });
+
+  it('logs a failed result to the game log on a weak roll', () => {
+    const monster = makeMonster('m_007'); // upper 10, requires 1 hero
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', username: 'Alice', party: [makeCard('h_043')], actionPoints: 3 }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    dice.next = [1, 1]; // 2 < 10, no modifiers in hand so it resolves immediately
+    connect(h, 'p1').fire('attackMonster', monster.instanceId);
+    expect(gs.players['p1']!.slainMonsters).toHaveLength(0);
+    const failed = gs.gameLog.filter(e => e.kind === 'action' && /attack on .* failed/i.test(e.text));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.text).toMatch(/needed 10/);
+  });
+
+  it('records a chat message in the game log', () => {
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('sendChat', '  hello world  ');
+    const chats = gs.gameLog.filter(e => e.kind === 'chat');
+    expect(chats).toHaveLength(1);
+    expect(chats[0]!.text).toBe('hello world'); // trimmed
+    expect(chats[0]!.username).toBe('p1'); // harness sets username to the socket id
+    expect(chats[0]!.playerId).toBe('p1');
+  });
+
+  it('ignores an empty chat message', () => {
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('sendChat', '   ');
+    expect(gs.gameLog.filter(e => e.kind === 'chat')).toHaveLength(0);
   });
 });
 
@@ -222,6 +266,7 @@ describe('endTurn / mulligan / choosePartyLeader / disconnect', () => {
     connect(h, 'p1').fire('endTurn');
     expect(gs.activePlayerId).toBe('p2');
     expect(gs.players['p2']!.actionPoints).toBe(3);
+    expect(gs.gameLog.some(e => e.kind === 'system' && /ended their turn/i.test(e.text))).toBe(true);
   });
 
   it('endTurn is rejected while a challenge is pending', () => {
@@ -246,6 +291,7 @@ describe('endTurn / mulligan / choosePartyLeader / disconnect', () => {
     connect(h, 'p1').fire('mulligan');
     expect(gs.players['p1']!.zones.hand).toHaveLength(5);
     expect(gs.players['p1']!.actionPoints).toBe(0);
+    expect(gs.gameLog.some(e => e.kind === 'action' && e.playerId === 'p1' && /mulligan/i.test(e.text))).toBe(true);
   });
 
   it('choosePartyLeader assigns the leader and advances selection', () => {
@@ -258,6 +304,7 @@ describe('endTurn / mulligan / choosePartyLeader / disconnect', () => {
     connect(h, 'p1').fire('choosePartyLeader', leader.instanceId);
     expect(gs.players['p1']!.partyLeaderId).toBe('p_001');
     expect(gs.currentSelectionPlayerId).toBe('p2');
+    expect(gs.gameLog.some(e => e.kind === 'system' && /party leader/i.test(e.text))).toBe(true);
   });
 
   it('disconnect removes the player from the room', () => {

@@ -1,4 +1,16 @@
 import type { GameState } from '../../../shared/types';
+import { getClassColor } from './classColors';
+
+/**
+ * Each player's display color is the class color of their party leader, so a
+ * player reads as a consistent color across the info bar, opponents list, and
+ * chat. Players without a leader yet fall back to the neutral class color.
+ */
+export const getPlayerColor = (gameState: GameState, playerId?: string): string => {
+    const leaderId = playerId ? gameState.players[playerId]?.partyLeaderId : undefined;
+    const cls = leaderId ? gameState.cardTemplates[leaderId]?.class : undefined;
+    return getClassColor(cls);
+};
 
 export const getCardTypeLabel = (card: { cardType: string }, template?: Record<string, unknown>) => {
     const typeLabel = card.cardType.charAt(0).toUpperCase() + card.cardType.slice(1);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CardInstance, GameState } from '../../../../shared/types';
 import CardArt from '../CardArt';
+import DiceRoll from './DiceRoll';
 
 interface HeroAbilityModalProps {
     gameState: GameState;
@@ -9,6 +10,8 @@ interface HeroAbilityModalProps {
     mode: 'play' | 'party';
     isMyTurn: boolean;
     isHeroRolling: boolean;
+    rolledDie1?: number;
+    rolledDie2?: number;
     /** True while this player's roll is awaiting the opponents' modifier phase. */
     modifierPhaseActive: boolean;
     // play mode
@@ -43,6 +46,8 @@ export default function HeroAbilityModal({
     mode,
     isMyTurn,
     isHeroRolling,
+    rolledDie1,
+    rolledDie2,
     modifierPhaseActive,
     playHeroRollResult,
     handlePlayHeroRoll,
@@ -80,7 +85,7 @@ export default function HeroAbilityModal({
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
                     <button type="button" onClick={onClose} className="primaryButton">Close</button>
                 </div>
-                <CardArt cardId={hero.templateId} name={heroName} style={{ margin: '0 auto 0.75rem' }} />
+                <CardArt cardId={hero.templateId} name={heroName} style={{ width: 'min(70vw, 280px)', margin: '0 auto 0.75rem' }} />
 
                 {!rolled ? (
                     mode === 'play' ? (
@@ -107,36 +112,37 @@ export default function HeroAbilityModal({
                             {hero.effectUsedThisTurn ? 'Ability Used This Turn' : 'Roll for Hero Ability'}
                         </button>
                     )
-                ) : isHeroRolling ? (
-                    <div style={{ fontSize: '2rem', marginTop: '1rem', textAlign: 'center', animation: 'spin 0.1s infinite' }}>
-                        🎲 🎲
-                    </div>
-                ) : modifierPhaseActive ? (
-                    <div style={{ marginTop: '0.5rem', color: '#475569' }}>
-                        Waiting for other players to react to your roll…
-                    </div>
                 ) : (
                     <>
-                        {result && <div style={{ marginTop: '0.5rem', color: '#333' }}>{result}</div>}
-                        {canActivate ? (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!isMyTurn) return;
-                                    handleActivateHeroAbility(hero.instanceId);
-                                    // Dismiss so any follow-up ability-options prompt is unobstructed.
-                                    onClose();
-                                }}
-                                disabled={!isMyTurn}
-                                style={{ marginTop: '0.75rem', ...primaryBtn(isMyTurn, '#28a745') }}
-                            >
-                                Activate Ability
-                            </button>
+                        <DiceRoll rolling={isHeroRolling} die1={rolledDie1} die2={rolledDie2} />
+                        {isHeroRolling ? null : modifierPhaseActive ? (
+                            <div style={{ marginTop: '0.5rem', color: '#475569' }}>
+                                Waiting for other players to react to your roll…
+                            </div>
                         ) : (
-                            <button type="button" onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ marginTop: '0.75rem', ...primaryBtn(true, '#6c757d') }}>
-                                Done
-                            </button>
+                            <>
+                                {result && <div style={{ marginTop: '0.5rem', color: '#333' }}>{result}</div>}
+                                {canActivate ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!isMyTurn) return;
+                                            handleActivateHeroAbility(hero.instanceId);
+                                            // Dismiss so any follow-up ability-options prompt is unobstructed.
+                                            onClose();
+                                        }}
+                                        disabled={!isMyTurn}
+                                        style={{ marginTop: '0.75rem', ...primaryBtn(isMyTurn, '#28a745') }}
+                                    >
+                                        Activate Ability
+                                    </button>
+                                ) : (
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ marginTop: '0.75rem', ...primaryBtn(true, '#6c757d') }}>
+                                        Done
+                                    </button>
+                                )}
+                            </>
                         )}
                     </>
                 )}
