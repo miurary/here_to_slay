@@ -112,7 +112,7 @@ const handleConnection = (socket: Socket) => {
   const gameState = getRoomState(roomCode);
 
   if (!roomCode || !gameState) {
-    socket.emit('actionFailed', 'Room not found or room code missing.');
+    socket.emit('roomNotFound', 'Room not found or room code missing.');
     socket.disconnect();
     return;
   }

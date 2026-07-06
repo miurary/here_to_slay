@@ -118,6 +118,7 @@ export interface ServerToClientEvents {
   challengeResolved: (data: ChallengeResolvedData) => void;
   monsterAttackResult: (data: MonsterAttackResultData) => void;
   roomFull: (message: string) => void;
+  roomNotFound: (message: string) => void;
 }
 
 // need to fix clanker code

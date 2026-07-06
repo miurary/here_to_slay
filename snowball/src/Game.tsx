@@ -206,6 +206,11 @@ export default function Game() {
       navigate('/', { state: { error: msg } });
     });
 
+    client.on('roomNotFound', (msg: string) => {
+      client.disconnect();
+      navigate('/', { state: { error: msg } });
+    });
+
     client.on('connect_error', (error) => {
       setStatus(`Unable to join room: ${error.message}`);
     });
@@ -230,6 +235,7 @@ export default function Game() {
       client.off('challengeResolved');
       client.off('monsterAttackResult');
       client.off('roomFull');
+      client.off('roomNotFound');
       client.off('connect_error');
       client.disconnect();
     };

@@ -41,6 +41,16 @@ describe('connection setup', () => {
     expect(s.data.roomCode).toBe(h.roomCode);
     expect(h.io.broadcasts.some(b => b.event === 'stateUpdate')).toBe(true);
   });
+
+  it('emits roomNotFound and disconnects when the room does not exist', () => {
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1' })] });
+    const h = createHarness(gs);
+    const s = h.socket('p1');
+    s.handshake.auth.roomCode = 'NOPE';
+    handleConnection(s as never);
+    expect(lastOf(s, 'roomNotFound')).toMatch(/not found/i);
+    expect(s.disconnected).toBe(true);
+  });
 });
 
 describe('drawFromMain', () => {
