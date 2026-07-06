@@ -2,6 +2,7 @@
 import type { GameState } from '../../shared/src/types.js';
 import { heroesPlayedFromAbilityThisTurn, pendingChallenges, modifierPhases } from './state.js';
 import { decrementTemporaryModifiers } from './util.js';
+import { logGame } from './analytics.js';
 
 
 const triggerEndTurn = (
@@ -43,6 +44,13 @@ const triggerEndTurn = (
   delete gameState.pendingChallenge;
   modifierPhases.delete(roomCode);
   delete gameState.modifierPhase;
+
+  logGame(gameState, 'turn_ended', { forced: true, nextPlayerId }, playerId);
+  logGame(gameState, 'turn_started', {
+    turnNumber: gameState.turnNumber,
+    actionPoints: nextPlayer?.actionPoints,
+  }, nextPlayerId);
+
   sendRoomUpdate();
 };
 export { triggerEndTurn };

@@ -76,6 +76,32 @@ export interface MonsterAttackResultData {
   effectText: string;
 }
 
+/**
+ * In-game bug-report categories, worded by player-visible symptom (not by
+ * engine subsystem). The client renders these as options; the server treats
+ * any unknown id as 'other'.
+ */
+export const BUG_CATEGORIES = [
+  { id: 'card_behavior', label: "A card didn't do what it says" },
+  { id: 'dice_math', label: 'Dice, roll, or modifier math was wrong' },
+  { id: 'stuck', label: "Game is stuck / I can't do anything" },
+  { id: 'connection', label: 'Connection or sync problem' },
+  { id: 'visual', label: 'Visual glitch' },
+  { id: 'other', label: 'Other / suggestion' },
+] as const;
+
+export type BugCategory = typeof BUG_CATEGORIES[number]['id'];
+
+export interface BugReportInput {
+  category: BugCategory;
+  description: string;
+  /** Browser environment, filled in by the client at submit time. */
+  client?: {
+    userAgent?: string;
+    viewport?: string;
+  };
+}
+
 export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
@@ -103,10 +129,12 @@ export interface ClientToServerEvents {
   endTurn: () => void;
   quitGame: () => void;
   sendChat: (message: string) => void;
+  reportBug: (report: BugReportInput) => void;
 }
 
 export interface ServerToClientEvents {
   pongClient: (data: { message: string }) => void;
+  bugReportAck: (result: { ok: boolean; message: string }) => void;
   playersUpdated: (connectedPlayers: PlayerState[]) => void;
   stateUpdate: (state: GameState) => void;
   actionFailed: (message: string) => void;

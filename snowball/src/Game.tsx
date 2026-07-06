@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import type { AbilityPrompt, ChallengeResolvedData, ClientToServerEvents, ServerToClientEvents, GameState, CardInstance, PlayerState, MonsterAttackResultData } from '../../shared/types';
+import { setActiveSocket } from './utils/socketRef';
 import './App.css';
 
 import FirstRollCard from './components/game/FirstRollCard';
@@ -108,6 +109,8 @@ export default function Game() {
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSocket(client);
+    // Expose the socket to app-level UI (the bug-report button).
+    setActiveSocket(client);
 
     client.on('connect', () => {
       setMyId(client.id ?? '');
@@ -252,6 +255,7 @@ export default function Game() {
       client.off('roomFull');
       client.off('roomNotFound');
       client.off('connect_error');
+      setActiveSocket(null);
       client.disconnect();
     };
   }, [roomCode]);

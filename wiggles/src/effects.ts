@@ -18,6 +18,7 @@ import {
 import { executeRollAndEmit } from './rolls.js';
 import { processMagicCardSteps } from './magic.js';
 import { triggerEndTurn } from './turns.js';
+import { logGame } from './analytics.js';
 
 
 // ── Slain-monster reactive passives ──────────────────────────────────────────
@@ -112,6 +113,12 @@ const drawCardsForPlayer = (
 ): CardInstance[] => {
   const drawn = drawCards(gameState.mainDeck, count);
   player.zones.hand.push(...drawn);
+  if (drawn.length > 0) {
+    logGame(gameState, 'cards_drawn', {
+      count: drawn.length,
+      templateIds: drawn.map(c => c.templateId),
+    }, player.id);
+  }
   for (const card of drawn) {
     // m_005 Rex Major — drew a Modifier: may draw a second card.
     if (card.cardType === 'modifier') {
@@ -1853,6 +1860,8 @@ const activateHeroAbility = (
     sourceSocket.emit('actionFailed', 'This hero has no ability to activate.');
     return;
   }
+
+  logGame(gameState, 'hero_ability_activated', { heroTemplateId: hero.templateId }, sourceSocket.id);
 
   // Handle costs (SACRIFICE / DISCARD) before processing effects
   const costs = template.activeSkill.costs ?? [];

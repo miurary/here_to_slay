@@ -9,6 +9,7 @@ import { emitAbilityPrompt, buildPromptId, getIo, modifierPhases } from './state
 import type { ModifierPhaseState } from './state.js';
 import { getHeroEffectiveClass, applyWinIfMet } from './util.js';
 import { logEvent, nameOf } from './log.js';
+import { logGame } from './analytics.js';
 import { drawCardsForPlayer } from './effects.js';
 import { getSlainMonsterRollBonus, getOpponentsWithModifiers, updateModifierPhaseGameState } from './rolls.js';
 
@@ -161,6 +162,16 @@ const applyMonsterAttackEffects = (
     { id: player.id, username: player.username },
   );
 
+  logGame(gameState, 'monster_attack_resolved', {
+    monsterTemplateId: monster.templateId,
+    finalTotal,
+    upperBound,
+    lowerBound,
+    outcome: slew ? 'slain' : finalTotal < lowerBound ? 'penalty' : 'miss',
+    effectText,
+    effects: effects.map(e => e.action),
+  }, player.id);
+
   for (const effect of effects) {
     if (effect.action === 'SLAY') {
       const monsterIdx = gameState.activeMonsters.findIndex((m: MonsterInstance) => m.instanceId === monster.instanceId);
@@ -226,6 +237,15 @@ const executeMonsterAttackRoll = (
   const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
   const rollerNeedsPrompt = currentTotal < upperBound && rollerHasModifiers;
+
+  logGame(gameState, 'monster_attack_roll', {
+    monsterTemplateId: monster.templateId,
+    die1, die2, attackBonus,
+    total: currentTotal,
+    upperBound,
+    lowerBound,
+    contested: rollerNeedsPrompt || opponentsWithModifiers.length > 0,
+  }, socket.id);
 
   const success = currentTotal >= upperBound;
   const statusWord = success ? 'Hit!' : currentTotal < lowerBound ? 'Penalty!' : 'Miss.';

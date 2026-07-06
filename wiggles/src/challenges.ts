@@ -5,6 +5,7 @@ import type {
 import { getSocketByPlayerId, getIo, pendingChallenges, markHeroPlayedFromAbility } from './state.js';
 import type { PendingChallengeState } from './state.js';
 import { getHeroEffectiveClass, moveCardBetweenZones, applyWinIfMet } from './util.js';
+import { logGame } from './analytics.js';
 import { processMagicCardSteps } from './magic.js';
 import { getSlainMonsterRollBonus } from './rolls.js';
 
@@ -63,11 +64,22 @@ const openChallengeWindow = (roomCode: string, gameState: GameState, pending: Pe
     eligibleChallengerIds: [...pending.eligibleChallengerIds],
   };
   pendingChallenges.set(roomCode, pending);
+  logGame(gameState, 'challenge_window_opened', {
+    cardTemplateId: pending.pendingCardInstance.templateId,
+    cardType: pending.pendingCardType,
+    eligibleChallengerIds: [...pending.eligibleChallengerIds],
+  }, pending.pendingPlayerId);
 };
 
 const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState, gameState: GameState) => {
   const player = gameState.players[pending.pendingPlayerId];
   if (!player) return;
+
+  logGame(gameState, 'card_play_resolved', {
+    cardTemplateId: pending.pendingCardInstance.templateId,
+    cardType: pending.pendingCardType,
+    ...(pending.itemTargetPlayerId ? { itemTargetPlayerId: pending.itemTargetPlayerId } : {}),
+  }, pending.pendingPlayerId);
 
   if (pending.pendingCardType === 'hero') {
     player.zones.party.push(pending.pendingCardInstance);
@@ -118,6 +130,19 @@ const resolveChallengeRollOff = (
   const challengedRoll = Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1;
 
   const challengerWon = challengerTotalRoll > challengedRoll;
+
+  logGame(gameState, 'challenge_resolved', {
+    challengerId: pending.challengerId,
+    challengedPlayerId: pending.pendingPlayerId,
+    challengerRoll,
+    challengerBonus,
+    challengerTotalRoll,
+    challengedRoll,
+    challengerWon,
+    cardTemplateId: pending.pendingCardInstance.templateId,
+    cardType: pending.pendingCardType,
+    cardFate: challengerWon ? 'discarded' : 'played',
+  }, pending.challengerId);
 
   if (pending.challengeCardInstanceId) {
     moveCardBetweenZones(challenger.zones.hand, gameState.discardPile, pending.challengeCardInstanceId);

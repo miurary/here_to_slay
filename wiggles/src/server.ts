@@ -5,12 +5,17 @@ import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import type {
   ClientToServerEvents, ServerToClientEvents,
-  Effect, GameState, MonsterInstance,
+  BugCategory, Effect, GameState, MonsterInstance,
 } from '../../shared/src/types.js';
+import { BUG_CATEGORIES } from '../../shared/src/types.js';
 import { logEvent, nameOf } from './log.js';
+import {
+  beginGameSession, currentSessionInfo, endGameSession, logGame, saveBugReport,
+  shutdownAnalytics, sweepOrphanedLogs,
+} from './analytics.js';
 import { drawCards, initializeDecks, loadAllCardTemplates } from './cards.js';
 import {
-  rooms, getRoomState, setIo, getIo, emitAbilityPrompt, buildPromptId,
+  rooms, getRoomState, setIo, getIo, emitAbilityPrompt, buildPromptId, abilityPromptRequests,
   pendingChallenges, modifierPhases, heroesPlayedFromAbilityThisTurn, markHeroPlayedFromAbility,
 } from './state.js';
 import type { AbilityPromptOption } from './state.js';
@@ -149,6 +154,7 @@ const beginPartyLeaderSelection = (gameState: GameState) => {
   gameState.partyLeaderSelectionOrder = selectionOrder;
   gameState.currentSelectionPlayerId = selectionOrder[0];
   gameState.diceRolls = {};
+  logGame(gameState, 'party_leader_selection_started', { selectionOrder });
 };
 
 const beginInProgress = (gameState: GameState) => {
@@ -159,6 +165,7 @@ const beginInProgress = (gameState: GameState) => {
     if (!p) continue;
     p.actionPoints = 3;
   }
+  logGame(gameState, 'first_turn_started', { activePlayerId: gameState.activePlayerId }, gameState.activePlayerId);
 };
 
 const scheduleAutoAdvance = (roomCode: string, gameState: GameState) => {
@@ -217,6 +224,8 @@ const handleConnection = (socket: Socket) => {
         party: [],
       }
     };
+    // No-op unless a game is in progress (lobby joins have no session yet).
+    logGame(gameState, 'player_joined', { username: gameState.players[socket.id]?.username }, socket.id);
   } else if (username) {
     player.username = username;
   }
@@ -247,6 +256,64 @@ const handleConnection = (socket: Socket) => {
     if (!text) return;
     logEvent(gameState, 'chat', text, { id: socket.id, username: sender.username });
     sendRoomUpdate();
+  });
+
+  // One report per connection per cooldown window, so a stuck button (or a
+  // troll) can't flood the bugs/ prefix.
+  const BUG_REPORT_COOLDOWN_MS = 30_000;
+  let lastBugReportAt = 0;
+  const validBugCategories = new Set<string>(BUG_CATEGORIES.map(c => c.id));
+
+  socket.on('reportBug', (report) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
+    const description = (report?.description ?? '').toString().trim().slice(0, 2000);
+    if (!description) {
+      socket.emit('bugReportAck', { ok: false, message: 'Please describe the bug before sending.' });
+      return;
+    }
+    const now = Date.now();
+    if (now - lastBugReportAt < BUG_REPORT_COOLDOWN_MS) {
+      socket.emit('bugReportAck', { ok: false, message: 'Please wait a bit before sending another report.' });
+      return;
+    }
+    lastBugReportAt = now;
+
+    const category: BugCategory = validBugCategories.has(report?.category as string)
+      ? report.category
+      : 'other';
+    const reporter = gameState.players[socket.id];
+
+    // Everything the player shouldn't have to describe: where the game stood,
+    // where in the analytics replay to look, and what just happened on screen.
+    void saveBugReport(roomCode, {
+      reportedAt: new Date(now).toISOString(),
+      roomCode,
+      reporter: { id: socket.id, username: reporter?.username },
+      category,
+      description,
+      client: {
+        userAgent: (report?.client?.userAgent ?? '').toString().slice(0, 300),
+        viewport: (report?.client?.viewport ?? '').toString().slice(0, 30),
+      },
+      game: {
+        status: gameState.status,
+        turnNumber: gameState.turnNumber,
+        activePlayerId: gameState.activePlayerId,
+        winnerId: gameState.winnerId ?? null,
+        pendingChallenge: gameState.pendingChallenge ?? null,
+        modifierPhase: gameState.modifierPhase ?? null,
+        session: currentSessionInfo(gameState) ?? null,
+      },
+      recentLog: gameState.gameLog.slice(-20),
+    });
+
+    // Also stamp the report into the game's event stream, where it lands with
+    // the full board snapshot attached (no-op if no session is active).
+    logGame(gameState, 'bug_report', { category, description }, socket.id);
+
+    socket.emit('bugReportAck', { ok: true, message: 'Thanks — your report was sent.' });
   });
 
   socket.on('toggleReady', () => {
@@ -303,6 +370,14 @@ const handleConnection = (socket: Socket) => {
     gameState.turnNumber = 0;
     logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} started the game.`, { id: socket.id, username: gameState.players[socket.id]?.username });
 
+    beginGameSession(gameState);
+    logGame(gameState, 'game_start', {
+      players: Object.values(gameState.players).map(p => ({ id: p.id, username: p.username })),
+      lobbyLeaderId: gameState.lobbyLeaderId,
+      targetMonstersToWin: gameState.targetMonstersToWin ?? 3,
+      activeMonsters: gameState.activeMonsters.map(m => m.templateId),
+    }, socket.id);
+
     sendRoomUpdate();
   });
 
@@ -338,6 +413,7 @@ const handleConnection = (socket: Socket) => {
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
     logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} drew a card.`, { id: socket.id, username: player.username });
+    logGame(gameState, 'draw_action', { templateId: card.templateId, apRemaining: player.actionPoints }, socket.id);
 
     socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
 
@@ -362,11 +438,16 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
+    const mulliganDiscarded = player.zones.hand.map(c => c.templateId);
     gameState.discardPile.push(...player.zones.hand);
     player.zones.hand = [];
     drawCardsForPlayer(gameState, player, 5);
     player.actionPoints = (player.actionPoints ?? 0) - 3;
     logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} mulliganed their hand.`, { id: socket.id, username: player.username });
+    logGame(gameState, 'mulligan', {
+      discarded: mulliganDiscarded,
+      newHand: player.zones.hand.map(c => c.templateId),
+    }, socket.id);
 
     sendRoomUpdate();
   });
@@ -417,6 +498,11 @@ const handleConnection = (socket: Socket) => {
 
     const roomCode = socket.data.roomCode as string;
     const eligibleChallengerIds = getEligibleChallengerIds(gameState, socket.id);
+    logGame(gameState, 'hero_played', {
+      templateId: playedCard.templateId,
+      challengeWindowOpened: eligibleChallengerIds.length > 0,
+      eligibleChallengerIds,
+    }, socket.id);
 
     if (eligibleChallengerIds.length > 0) {
       openChallengeWindow(roomCode, gameState, {
@@ -476,6 +562,11 @@ const handleConnection = (socket: Socket) => {
     const magicRoomCode = socket.data.roomCode as string;
     const steps: Effect[] = template.effect.steps ?? [template.effect as unknown as Effect];
     const magicEligibleIds = getEligibleChallengerIds(gameState, socket.id);
+    logGame(gameState, 'magic_played', {
+      templateId: removedMagicCard.templateId,
+      challengeWindowOpened: magicEligibleIds.length > 0,
+      eligibleChallengerIds: magicEligibleIds,
+    }, socket.id);
 
     if (magicEligibleIds.length > 0) {
       openChallengeWindow(magicRoomCode, gameState, {
@@ -559,6 +650,12 @@ const handleConnection = (socket: Socket) => {
     const itemEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
       ? []
       : getEligibleChallengerIds(gameState, socket.id);
+    logGame(gameState, 'item_played', {
+      templateId: removedItem.templateId,
+      targetHeroTemplateId: targetHero.templateId,
+      challengeWindowOpened: itemEligibleIds.length > 0,
+      eligibleChallengerIds: itemEligibleIds,
+    }, socket.id);
 
     if (itemEligibleIds.length > 0) {
       openChallengeWindow(itemRoomCode, gameState, {
@@ -653,6 +750,13 @@ const handleConnection = (socket: Socket) => {
     const cursedEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
       ? []
       : getEligibleChallengerIds(gameState, socket.id);
+    logGame(gameState, 'cursed_item_played', {
+      templateId: removedCursedItem.templateId,
+      targetPlayerId,
+      targetHeroTemplateId: targetHero.templateId,
+      challengeWindowOpened: cursedEligibleIds.length > 0,
+      eligibleChallengerIds: cursedEligibleIds,
+    }, socket.id);
 
     if (cursedEligibleIds.length > 0) {
       openChallengeWindow(cursedRoomCode, gameState, {
@@ -718,6 +822,13 @@ const handleConnection = (socket: Socket) => {
     pending.challengerId = socket.id;
     pending.challengeCardInstanceId = challengeCardInstanceId;
     pending.challengerRollBonus = getChallengeCardBonus(template);
+    logGame(gameState, 'challenge_played', {
+      challengeCardTemplateId: challengeCard.templateId,
+      challengerBonus: pending.challengerRollBonus,
+      againstPlayerId: pending.pendingPlayerId,
+      againstCardTemplateId: pending.pendingCardInstance.templateId,
+      againstCardType: pending.pendingCardType,
+    }, socket.id);
 
     const gsPending = gameState.pendingChallenge;
     if (gsPending) gsPending.challengerId = socket.id;
@@ -765,6 +876,11 @@ const handleConnection = (socket: Socket) => {
 
     pending.passedPlayerIds.add(socket.id);
     const remaining = pending.eligibleChallengerIds.filter(id => !pending.passedPlayerIds.has(id));
+    logGame(gameState, 'challenge_passed', {
+      againstCardTemplateId: pending.pendingCardInstance.templateId,
+      remainingEligible: remaining,
+      resolvedUnchallenged: remaining.length === 0,
+    }, socket.id);
 
     if (remaining.length === 0) {
       executePendingCardPlay(roomCode, pending, gameState);
@@ -850,6 +966,15 @@ const handleConnection = (socket: Socket) => {
       amount,
       choiceLabel,
     });
+    logGame(gameState, 'modifier_played', {
+      templateId: card.templateId,
+      amount,
+      choiceLabel,
+      rollContext: phase.rollContext,
+      rollingPlayerId: phase.rollingPlayerId,
+      newTotal: phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier,
+      requiredRoll: phase.requiredRoll,
+    }, socket.id);
 
     // m_006 Crowned Serpent: each time ANY player plays a modifier, every player
     // who has slain a Crowned Serpent may draw a card.
@@ -895,6 +1020,14 @@ const handleConnection = (socket: Socket) => {
       socket.emit('actionFailed', 'It is not your turn to pass.');
       return;
     }
+
+    logGame(gameState, 'modifier_passed', {
+      rollContext: phase.rollContext,
+      rollingPlayerId: phase.rollingPlayerId,
+      phaseStage: phase.phase,
+      currentTotal: phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier,
+      requiredRoll: phase.requiredRoll,
+    }, socket.id);
 
     if (phase.phase === 'roller_turn') {
       phase.phase = 'opponent_turn';
@@ -969,6 +1102,7 @@ const handleConnection = (socket: Socket) => {
         label: `${p.username ?? id} (${p.zones.hand.length} card${p.zones.hand.length !== 1 ? 's' : ''})`,
         payload: { playerId: id },
       }));
+      logGame(gameState, 'party_leader_ability_used', { action: 'STEAL_CARD', apCost }, socket.id);
       emitAbilityPrompt(socket.id, {
         promptId: buildPromptId(),
         roomCode,
@@ -995,6 +1129,7 @@ const handleConnection = (socket: Socket) => {
           payload: { cardInstanceId: card.instanceId },
         };
       });
+      logGame(gameState, 'party_leader_ability_used', { action: 'SEARCH_DISCARD', apCost }, socket.id);
       emitAbilityPrompt(socket.id, {
         promptId: buildPromptId(),
         roomCode,
@@ -1053,6 +1188,10 @@ const handleConnection = (socket: Socket) => {
 
     player.actionPoints = (player.actionPoints ?? 0) - 2;
     logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} is attacking ${monsterTemplate.name ?? 'a monster'}.`, { id: socket.id, username: player.username });
+    logGame(gameState, 'monster_attack_started', {
+      monsterTemplateId: monster.templateId,
+      apRemaining: player.actionPoints,
+    }, socket.id);
     executeMonsterAttackRoll(roomCode, socket, gameState, player, monster, monsterTemplate, sendRoomUpdate);
   });
 
@@ -1186,11 +1325,28 @@ const handleConnection = (socket: Socket) => {
     activateHeroAbility(socket, gameState, heroInstanceId, sendRoomUpdate);
   });
 
+  // Logged before handling so the snapshot shows the pre-resolution board; the
+  // effect's outcome is visible in the next event's snapshot.
+  const logPromptResponse = (promptId: string, selectedOptionIds: string[]) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    const prompt = abilityPromptRequests.get(promptId);
+    if (!gameState || !prompt) return;
+    logGame(gameState, 'prompt_response', {
+      promptType: prompt.promptType,
+      message: prompt.message,
+      effectAction: prompt.effect.action,
+      selected: selectedOptionIds.map(id => prompt.options.find(o => o.id === id)?.label ?? id),
+      selectedOptionIds,
+    }, socket.id);
+  };
+
   socket.on('respondToAbilityPrompt', (promptId, selectedOptionId) => {
+    logPromptResponse(promptId, [selectedOptionId]);
     handlePromptResponse(socket, promptId, selectedOptionId, sendRoomUpdate);
   });
 
   socket.on('respondToAbilityPromptMulti', (promptId, selectedOptionIds) => {
+    logPromptResponse(promptId, selectedOptionIds);
     handleMultiPromptResponse(socket, promptId, selectedOptionIds, sendRoomUpdate);
   });
 
@@ -1213,6 +1369,7 @@ const handleConnection = (socket: Socket) => {
 
     // Initial "roll for first" should not include any temporary roll bonuses.
     gameState.diceRolls[socket.id] = total;
+    logGame(gameState, 'turn_order_roll', { die1, die2, total }, socket.id);
 
     const playerIds = Object.keys(gameState.players);
     const rolledPlayerIds = Object.keys(gameState.diceRolls);
@@ -1238,6 +1395,7 @@ const handleConnection = (socket: Socket) => {
       gameState.turnNumber = 1;
       gameState.phase = 'DRAW';
       gameState.status = 'roll_complete';
+      logGame(gameState, 'turn_order_decided', { rolls: gameState.diceRolls, firstPlayerId: winnerId });
       scheduleAutoAdvance(socket.data.roomCode as string, gameState);
     }
 
@@ -1316,6 +1474,11 @@ const handleConnection = (socket: Socket) => {
     delete gameState.roomFlags;
 
     logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} ended their turn. It is now ${nameOf(gameState, nextPlayerId)}'s turn.`, { id: socket.id, username: currentPlayer?.username });
+    logGame(gameState, 'turn_ended', { forced: false, nextPlayerId }, socket.id);
+    logGame(gameState, 'turn_started', {
+      turnNumber: gameState.turnNumber,
+      actionPoints: nextPlayer?.actionPoints,
+    }, nextPlayerId);
 
     sendRoomUpdate();
   });
@@ -1350,6 +1513,10 @@ const handleConnection = (socket: Socket) => {
     player.zones.party = [chosenCard];
     player.partyLeaderId = chosenCard.templateId;
     logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} chose ${gameState.cardTemplates[chosenCard.templateId]?.name ?? 'a party leader'} as their party leader.`, { id: socket.id, username: player.username });
+    logGame(gameState, 'party_leader_chosen', {
+      templateId: chosenCard.templateId,
+      remainingChoices: gameState.availablePartyLeaderCards.map(c => c.templateId),
+    }, socket.id);
 
     const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
       (id) => id === socket.id
@@ -1373,6 +1540,9 @@ const handleConnection = (socket: Socket) => {
   socket.on('quitGame', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState) return;
+
+    // Close the analytics session while the final board is still intact.
+    void endGameSession(gameState, 'reset', { resetBy: socket.id });
 
     gameState.status = 'waiting';
     gameState.activePlayerId = gameState.lobbyLeaderId || '';
@@ -1501,6 +1671,11 @@ const handleConnection = (socket: Socket) => {
       }
     }
 
+    logGame(gameState, 'player_disconnected', {
+      username: gameState.players[socket.id]?.username,
+      wasActivePlayer: gameState.activePlayerId === socket.id,
+    }, socket.id);
+
     delete gameState.players[socket.id];
 
     if (gameState.activePlayerId === socket.id) {
@@ -1514,6 +1689,7 @@ const handleConnection = (socket: Socket) => {
     const room = getIo().sockets.adapter.rooms.get(roomCode);
     const roomCount = room?.size ?? 0;
     if (roomCount === 0) {
+      void endGameSession(gameState, 'abandoned');
       delete rooms[roomCode];
       return;
     }
@@ -1532,7 +1708,32 @@ const PORT = process.env.PORT || 3001;
 // Only bind a port when run as the entrypoint. Importing server.ts in tests
 // (Vitest sets process.env.VITEST) must not boot a real server.
 if (!process.env.VITEST) {
+  // Ship any game logs a previous process left behind before serving traffic.
+  void sweepOrphanedLogs();
+
   httpServer.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
+
+  // ECS sends SIGTERM before killing the task; close open analytics sessions
+  // (reason server_shutdown) and let the uploads finish, capped so a wedged S3
+  // call can't stall the stop past the orchestrator's grace period.
+  let shuttingDown = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}, flushing analytics before exit…`);
+    void (async () => {
+      try {
+        await Promise.race([
+          shutdownAnalytics(),
+          new Promise(resolve => setTimeout(resolve, 10_000)),
+        ]);
+      } finally {
+        process.exit(0);
+      }
+    })();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }

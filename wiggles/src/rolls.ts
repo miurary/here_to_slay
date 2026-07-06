@@ -8,6 +8,7 @@ import type { Socket } from 'socket.io';
 import { getSocketByPlayerId, modifierPhases } from './state.js';
 import type { ModifierPhaseState } from './state.js';
 import { getPlayerRollBonus } from './util.js';
+import { logGame } from './analytics.js';
 import { triggerSlainMonsterPassive } from './effects.js';
 import { emitItemTriggerPrompt } from './items.js';
 import { applyMonsterAttackEffects } from './monsters.js';
@@ -144,6 +145,19 @@ const finalizeRoll = (
 ) => {
   const finalTotal = phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier;
 
+  logGame(gameState, 'roll_finalized', {
+    rollType: phase.rollType,
+    die1: phase.die1,
+    die2: phase.die2,
+    persistentBonus: phase.persistentBonus,
+    accumulatedModifier: phase.accumulatedModifier,
+    finalTotal,
+    requiredRoll: phase.requiredRoll,
+    success: finalTotal >= phase.requiredRoll,
+    modifiersPlayed: phase.modifiersPlayed,
+    ...(phase.monsterInstanceId ? { monsterInstanceId: phase.monsterInstanceId } : {}),
+  }, phase.rollingPlayerId);
+
   modifierPhases.delete(roomCode);
   delete gameState.modifierPhase;
 
@@ -270,6 +284,15 @@ const executeRollAndEmit = (
   const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
   const rollerNeedsPrompt = currentTotal < requiredRoll && rollerHasModifiers;
+
+  logGame(gameState, 'hero_roll', {
+    heroTemplateId: hero.templateId,
+    die1, die2, persistentBonus,
+    total: currentTotal,
+    requiredRoll,
+    success: currentTotal >= requiredRoll,
+    contested: rollerNeedsPrompt || opponentsWithModifiers.length > 0,
+  }, socket.id);
 
   if (!rollerNeedsPrompt && opponentsWithModifiers.length === 0) {
     const success = currentTotal >= requiredRoll;

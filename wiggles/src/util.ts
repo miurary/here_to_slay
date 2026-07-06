@@ -5,6 +5,7 @@ import type {
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import { emitAbilityPrompt, buildPromptId } from './state.js';
+import { endGameSession } from './analytics.js';
 
 
 const moveCardBetweenZones = (
@@ -90,6 +91,7 @@ const applyWinIfMet = (gameState: GameState, player: Player, playerId: string): 
   if (checkWinCondition(gameState, player)) {
     gameState.status = 'finished';
     gameState.winnerId = playerId;
+    void endGameSession(gameState, 'win');
     return true;
   }
   return false;
