@@ -103,12 +103,21 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 // resolve sockets without importing the entrypoint.
 setIo(io);
 
+// Anonymous players are named by join order, skipping any name already taken
+// (e.g. a player who called themselves "Player 1", or an earlier anonymous join).
+const nextDefaultUsername = (gameState: GameState): string => {
+  const taken = new Set(Object.values(gameState.players).map(p => p.username));
+  for (let n = 1; ; n++) {
+    if (!taken.has(`Player ${n}`)) return `Player ${n}`;
+  }
+};
+
 // The per-connection handler. Exported so tests can drive it with a fake socket
 // (and fake io via setIo) without booting a real server. It resolves the live io
 // through getIo() so broadcasts go to whichever server instance is registered.
 const handleConnection = (socket: Socket) => {
   const roomCode = (socket.handshake.auth.roomCode as string | undefined)?.toUpperCase();
-  const username = socket.handshake.auth.username as string | undefined;
+  const username = (socket.handshake.auth.username as string | undefined)?.trim() || undefined;
   const gameState = getRoomState(roomCode);
 
   if (!roomCode || !gameState) {
@@ -131,7 +140,7 @@ const handleConnection = (socket: Socket) => {
   if (!player) {
     gameState.players[socket.id] = {
       id: socket.id,
-      username,
+      username: username ?? nextDefaultUsername(gameState),
       ready: false,
       actionPoints: 3,
       partyLeaderId: undefined,

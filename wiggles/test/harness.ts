@@ -196,6 +196,8 @@ export interface Harness {
   roomCode: string;
   /** The fake socket for a given player id. */
   socket(id: string): FakeSocket;
+  /** Create and register a fake socket for an id that isn't a seeded player (a fresh join). */
+  addSocket(id: string): FakeSocket;
   /** No-op-ish room update callback passed to engine entrypoints. */
   sendRoomUpdate: () => void;
   roomUpdateCount(): number;
@@ -230,6 +232,11 @@ export const createHarness = (gameState: GameState, roomCode = 'ROOM'): Harness 
     socket(id) {
       const s = socketMap.get(id);
       if (!s) throw new Error(`no fake socket for player ${id}`);
+      return s;
+    },
+    addSocket(id) {
+      const s = makeSocket(id, roomCode);
+      socketMap.set(id, s);
       return s;
     },
     sendRoomUpdate,

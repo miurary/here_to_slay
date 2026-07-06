@@ -51,6 +51,27 @@ describe('connection setup', () => {
     expect(lastOf(s, 'roomNotFound')).toMatch(/not found/i);
     expect(s.disconnected).toBe(true);
   });
+
+  it('assigns default usernames by join order when none is provided', () => {
+    const gs = buildGameState({ status: 'waiting', players: [] });
+    const h = createHarness(gs);
+    for (const id of ['anon1', 'anon2']) {
+      const s = h.addSocket(id);
+      s.handshake.auth.username = undefined;
+      handleConnection(s as never);
+    }
+    expect(gs.players['anon1']!.username).toBe('Player 1');
+    expect(gs.players['anon2']!.username).toBe('Player 2');
+  });
+
+  it('skips default usernames that are already taken', () => {
+    const gs = buildGameState({ status: 'waiting', players: [buildPlayer({ id: 'p1', username: 'Player 1' })] });
+    const h = createHarness(gs);
+    const s = h.addSocket('anon');
+    s.handshake.auth.username = '   ';
+    handleConnection(s as never);
+    expect(gs.players['anon']!.username).toBe('Player 2');
+  });
 });
 
 describe('lobby ready-up and start gating', () => {
