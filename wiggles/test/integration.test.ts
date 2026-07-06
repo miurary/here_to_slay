@@ -46,6 +46,9 @@ describe('integration — full lobby lifecycle over real sockets', () => {
     const b = await newClient(roomCode, 'B');
     await a.waitState(gs => Object.keys(gs.players).length === 2);
 
+    b.emit('toggleReady'); // lobby leader (a) is exempt from readying up
+    await a.waitState(gs => !!gs.players[b.id]?.ready);
+
     a.emit('startGame');
     await a.waitState(gs => gs.status === 'rolling');
 

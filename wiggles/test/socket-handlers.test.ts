@@ -53,6 +53,54 @@ describe('connection setup', () => {
   });
 });
 
+describe('lobby ready-up and start gating', () => {
+  const lobby = (...players: Parameters<typeof buildPlayer>[0][]) => {
+    const gs = buildGameState({ status: 'waiting', players: players.map(buildPlayer) });
+    gs.lobbyLeaderId = players[0]!.id;
+    return gs;
+  };
+
+  it('toggleReady flips the ready flag while waiting', () => {
+    const gs = lobby({ id: 'p1' }, { id: 'p2' });
+    const h = createHarness(gs);
+    connect(h, 'p2').fire('toggleReady');
+    expect(gs.players['p2']!.ready).toBe(true);
+    h.socket('p2').fire('toggleReady');
+    expect(gs.players['p2']!.ready).toBe(false);
+  });
+
+  it('ignores toggleReady once the game is no longer waiting', () => {
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    const h = createHarness(gs);
+    connect(h, 'p2').fire('toggleReady');
+    expect(gs.players['p2']!.ready).toBe(false);
+  });
+
+  it('rejects startGame with fewer than 2 players', () => {
+    const gs = lobby({ id: 'p1' });
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('startGame');
+    expect(gs.status).toBe('waiting');
+    expect(lastOf(h.socket('p1'), 'actionFailed')).toMatch(/at least 2 players/i);
+  });
+
+  it('rejects startGame while a non-leader player is not ready', () => {
+    const gs = lobby({ id: 'p1' }, { id: 'p2', ready: true }, { id: 'p3' });
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('startGame');
+    expect(gs.status).toBe('waiting');
+    expect(lastOf(h.socket('p1'), 'actionFailed')).toMatch(/ready/i);
+  });
+
+  it('starts once all non-leader players are ready, clearing ready flags', () => {
+    const gs = lobby({ id: 'p1' }, { id: 'p2', ready: true });
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('startGame');
+    expect(gs.status).toBe('rolling');
+    expect(gs.players['p2']!.ready).toBe(false);
+  });
+});
+
 describe('drawFromMain', () => {
   it('draws a card and spends 1 AP on your turn', () => {
     const gs = buildGameState({ players: [buildPlayer({ id: 'p1', actionPoints: 3 }), buildPlayer({ id: 'p2' })], mainDeck: [makeCard('s_001')] });

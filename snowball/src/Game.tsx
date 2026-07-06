@@ -21,6 +21,10 @@ import ActiveMonstersSidebarCard from './components/game/ActiveMonstersSidebarCa
 import ChatLogPanel from './components/game/ChatLogPanel';
 import OpponentInformationCard from './components/game/OpponentInformationCard';
 
+const MAX_PLAYERS = 6;
+// Fixed lobby avatar palette, assigned by join order.
+const AVATAR_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0891b2'];
+
 export default function Game() {
   const { roomCode: rawRoomCode } = useParams();
   const roomCode = rawRoomCode?.toUpperCase() ?? '';
@@ -72,6 +76,7 @@ export default function Game() {
   const [status, setStatus] = useState<string>(!roomCode ? 'Missing room code.' : 'Connecting...');
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   useEffect(() => {
     pendingHeroPlayIdRef.current = pendingHeroPlayId;
@@ -261,6 +266,21 @@ export default function Game() {
 
   const handleStart = () => {
     socket?.emit('startGame');
+  };
+
+  const handleToggleReady = () => {
+    socket?.emit('toggleReady');
+  };
+
+  const handleCopyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      setActionMessage('Could not copy the invite link — copy the page URL instead.');
+      setTimeout(() => setActionMessage(null), 3000);
+    }
   };
 
   const handleRoll = () => {
@@ -926,6 +946,14 @@ export default function Game() {
           <div className="gameHeaderLeft">
             <h1>Room {roomCode}</h1>
             <p>Status: <strong>{status}</strong></p>
+            <button
+              type="button"
+              onClick={handleCopyInvite}
+              className="buttonPrimary"
+              style={{ padding: '6px 12px', fontSize: '0.8rem', alignSelf: 'flex-start', ...(inviteCopied ? { background: '#16a34a' } : {}) }}
+            >
+              {inviteCopied ? '✓ Link copied!' : '🔗 Copy invite link'}
+            </button>
           </div>
           <form className="gameHeaderUsername" onSubmit={handleSubmit}>
             <input
@@ -1062,17 +1090,43 @@ export default function Game() {
                 );
               })()}
 
-              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId === myId && (
-                <button type="button" onClick={handleStart} className="primaryButton" style={{ alignSelf: 'flex-start' }}>
-                  Start Game
-                </button>
-              )}
-
-              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId !== myId && (
-                <p style={{ color: '#666' }}>
-                  Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to start the game...
-                </p>
-              )}
+              {gameState?.status === 'waiting' && (() => {
+                const leaderId = gameState.lobbyLeaderId;
+                const leaderName = (leaderId ? gameState.players[leaderId]?.username : undefined) ?? 'the lobby leader';
+                const amReady = !!players.find(p => p.id === myId)?.ready;
+                // The leader starts the game, so only everyone else readies up.
+                const everyoneReady = players.every(p => p.id === leaderId || p.ready);
+                const canStart = players.length >= 2 && everyoneReady;
+                const startHint = players.length < 2
+                  ? 'Need at least 2 players to start.'
+                  : everyoneReady ? null : 'Waiting for everyone to ready up…';
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    {leaderId === myId ? (
+                      <>
+                        <button type="button" onClick={handleStart} disabled={!canStart} className="buttonPrimary">
+                          Start Game
+                        </button>
+                        {startHint && <span style={{ color: '#64748b', fontSize: '0.9rem' }}>{startHint}</span>}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleToggleReady}
+                          className="buttonPrimary"
+                          style={amReady ? { background: '#16a34a', boxShadow: '0 14px 30px rgba(22, 163, 74, 0.18)' } : undefined}
+                        >
+                          {amReady ? '✓ Ready' : 'Ready up'}
+                        </button>
+                        <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
+                          {amReady ? `Waiting for ${leaderName} to start the game…` : `Let ${leaderName} know you are ready to play.`}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {gameState?.status === 'rolling' && (
                 <FirstRollCard gameState={gameState} myId={myId} handleRoll={handleRoll} isRolling={isRolling} myRoll={myRoll} />
@@ -1091,15 +1145,43 @@ export default function Game() {
               )}
 
               <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
-                <h3>Players Connected</h3>
-                {players.length === 0 ? (
-                  <p>No players connected yet.</p>
-                ) : (
-                  players.map((player) => (
-                    <p key={player.id}>{player.username || player.id}</p>
-                  ))
-                )}
+                <h3>Players ({players.length}/{MAX_PLAYERS})</h3>
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  {players.map((player, index) => {
+                    const isLeader = player.id === gameState?.lobbyLeaderId;
+                    const isMe = player.id === myId;
+                    const displayName = player.username || player.id;
+                    return (
+                      <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white' }}>
+                        <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
+                          {displayName.charAt(0).toUpperCase()}
+                        </div>
+                        <span style={{ fontWeight: isMe ? 700 : 400, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {displayName}{isMe ? ' (you)' : ''}
+                        </span>
+                        {isLeader && <span title="Lobby leader">👑</span>}
+                        {gameState?.status === 'waiting' && !isLeader && (
+                          <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? '#166534' : '#64748b', backgroundColor: player.ready ? '#dcfce7' : '#f1f5f9' }}>
+                            {player.ready ? '✓ Ready' : 'Not ready'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {gameState?.status === 'waiting' && Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, i) => (
+                    <div key={`empty-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px dashed #cbd5e1', color: '#94a3b8' }}>
+                      <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', border: '1px dashed #cbd5e1', boxSizing: 'border-box' }} />
+                      <span style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for a player…</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {gameState && (
+                <div className="lobbyChat">
+                  <ChatLogPanel gameState={gameState} entries={gameState.gameLog ?? []} myId={myId} onSend={handleSendChat} />
+                </div>
+              )}
             </div>
           </div>
         )}

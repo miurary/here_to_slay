@@ -80,6 +80,7 @@ export interface ClientToServerEvents {
   pingServer: () => void;
   setUsername: (username: string) => void;
   startGame: () => void;
+  toggleReady: () => void;
   rollForFirst: () => void;
   rollHeroAbility: (heroInstanceId: string) => void;
   activateHeroAbility: (heroInstanceId: string) => void;
@@ -271,6 +272,8 @@ export type Player = PlayerState;
 export interface PlayerState {
   id: string;
   username: string | undefined;
+  /** Lobby ready-up flag; only meaningful while the game status is 'waiting'. */
+  ready?: boolean;
   actionPoints: number;
   partyLeaderId: string | undefined;
   slainMonsters: CardInstance[];

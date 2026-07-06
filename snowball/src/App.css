@@ -303,6 +303,15 @@ button {
   gap: 16px;
 }
 
+/* Pre-game chat: fixed-height docked panel under the player list.
+   position:relative anchors the expand overlay, same as .footerChat. */
+.lobbyChat {
+  position: relative;
+  display: flex;
+  height: 240px;
+  max-width: 520px;
+}
+
 /* Row 4 — footer: deck/discard | hand button | opponents */
 .gameFooter {
   display: flex;

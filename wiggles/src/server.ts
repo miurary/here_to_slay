@@ -132,6 +132,7 @@ const handleConnection = (socket: Socket) => {
     gameState.players[socket.id] = {
       id: socket.id,
       username,
+      ready: false,
       actionPoints: 3,
       partyLeaderId: undefined,
       slainMonsters: [],
@@ -172,13 +173,31 @@ const handleConnection = (socket: Socket) => {
     sendRoomUpdate();
   });
 
+  socket.on('toggleReady', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'waiting') return;
+    const player = gameState.players[socket.id];
+    if (!player) return;
+    player.ready = !player.ready;
+    sendRoomUpdate();
+  });
+
   socket.on('startGame', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'waiting') {
       return;
     }
 
-    if (Object.keys(gameState.players).length === 0) {
+    if (Object.keys(gameState.players).length < 2) {
+      socket.emit('actionFailed', 'Need at least 2 players to start.');
+      return;
+    }
+
+    // The lobby leader starts the game, so only everyone else has to ready up.
+    const allReady = Object.values(gameState.players)
+      .every(p => p.id === gameState.lobbyLeaderId || p.ready);
+    if (!allReady) {
+      socket.emit('actionFailed', 'All players must be ready before starting.');
       return;
     }
 
@@ -196,6 +215,7 @@ const handleConnection = (socket: Socket) => {
       if (!player) continue;
       const cards = drawCards(gameState.mainDeck, 5);
       player.zones.hand.push(...cards);
+      player.ready = false;
     }
 
     gameState.status = 'rolling';
@@ -1320,6 +1340,7 @@ const handleConnection = (socket: Socket) => {
       player.actionPoints = 3;
       player.partyLeaderId = undefined;
       player.slainMonsters = [];
+      player.ready = false;
     }
 
     // Fresh game back in the lobby — start the log over with the reset notice.
