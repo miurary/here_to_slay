@@ -4,9 +4,11 @@ interface RollCompleteCardProps {
     gameState: GameState;
     myId: string;
     handleContinue: () => void;
+    /** Seconds until the server auto-advances, or null when no countdown is pending. */
+    autoAdvanceSeconds?: number | null;
 }
 
-export default function RollCompleteCard( { gameState, myId, handleContinue }: RollCompleteCardProps) {
+export default function RollCompleteCard( { gameState, myId, handleContinue, autoAdvanceSeconds }: RollCompleteCardProps) {
     return (
         <div className="panel panelAccentGreen">
             <h2>Roll Results</h2>
@@ -26,11 +28,16 @@ export default function RollCompleteCard( { gameState, myId, handleContinue }: R
                 );
             })}
             </div>
+            {autoAdvanceSeconds != null && (
+            <p style={{ fontWeight: 700, color: '#28a745', marginBottom: '0.75rem' }}>
+                Continuing in {autoAdvanceSeconds}…
+            </p>
+            )}
             {gameState.lobbyLeaderId === myId ? (
             <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                Continue to Game
+                {autoAdvanceSeconds != null ? 'Continue now' : 'Continue to Game'}
             </button>
-            ) : (
+            ) : autoAdvanceSeconds == null && (
             <p style={{ color: '#666' }}>
                 Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
             </p>

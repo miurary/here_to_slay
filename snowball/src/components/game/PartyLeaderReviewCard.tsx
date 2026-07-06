@@ -5,9 +5,11 @@ interface PartyLeaderReviewCardProps {
     gameState: GameState;
     myId: string;
     handleContinue: () => void;
+    /** Seconds until the server auto-advances, or null when no countdown is pending. */
+    autoAdvanceSeconds?: number | null;
 }
 
-export default function PartyLeaderReviewCard({ gameState, myId, handleContinue }: PartyLeaderReviewCardProps) {
+export default function PartyLeaderReviewCard({ gameState, myId, handleContinue, autoAdvanceSeconds }: PartyLeaderReviewCardProps) {
     return (
         <div className="panel panelAccentGreen" style={{ width: '100%', boxSizing: 'border-box' }}>
             <h2 style={{ marginBottom: '0.5rem' }}>Party Leader Review</h2>
@@ -45,11 +47,16 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue 
                 })}
                 </div>
             </div>
+            {autoAdvanceSeconds != null && (
+                <p style={{ fontWeight: 700, color: '#20c997', marginBottom: '0.75rem' }}>
+                Starting in {autoAdvanceSeconds}…
+                </p>
+            )}
             {gameState.lobbyLeaderId === myId ? (
                 <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#20c997', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                Continue to Game
+                {autoAdvanceSeconds != null ? 'Start now' : 'Continue to Game'}
                 </button>
-            ) : (
+            ) : autoAdvanceSeconds == null && (
                 <p style={{ color: '#666' }}>
                 Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
                 </p>

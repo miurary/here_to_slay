@@ -294,22 +294,35 @@ button {
   overflow: auto;
   min-height: 0;
 }
+/* Middle column of .boardPreGrid: the status cards. */
 .boardPreInner {
-  width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
-/* Pre-game chat: fixed-height docked panel under the player list.
-   position:relative anchors the expand overlay, same as .footerChat. */
-.lobbyChat {
+/* Pre-game 3-column layout: players (left) | status cards | chat (right) */
+.boardPreGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+/* position:relative anchors the chat's expand overlay, same as .footerChat. */
+.boardPreRight {
   position: relative;
   display: flex;
-  height: 240px;
-  max-width: 520px;
+  height: min(65vh, 620px);
+}
+@media (max-width: 1100px) {
+  .boardPreGrid {
+    grid-template-columns: 1fr;
+  }
+  .boardPreRight {
+    height: 300px;
+  }
 }
 
 /* Row 4 — footer: deck/discard | hand button | opponents */

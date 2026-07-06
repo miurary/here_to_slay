@@ -35,7 +35,13 @@ export default function Game() {
   const [isRolling, setIsRolling] = useState(false);
   const [rollAnimationTimer, setRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [heroRollAnimationTimer, setHeroRollAnimationTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const MIN_ROLL_ANIMATION_MS = 3000;
+  const MIN_ROLL_ANIMATION_MS = 2000;
+  // How long the dice take to settle onto their faces once the tumble stops.
+  const ROLL_SETTLE_MS = 900;
+  // Keeps FirstRollCard mounted through my tumble + settle, even after the
+  // server has already moved the room to roll_complete (the last roller would
+  // otherwise never see their animation).
+  const [rollAnimActive, setRollAnimActive] = useState(false);
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
   const [showDiscardPile, setShowDiscardPile] = useState(false);
@@ -57,6 +63,7 @@ export default function Game() {
   const [playHeroRollResult, setPlayHeroRollResult] = useState<string | null>(null);
   const [isHeroRolling, setIsHeroRolling] = useState(false);
   const [rolledDice, setRolledDice] = useState<{ die1: number; die2: number } | null>(null);
+  const rollAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(rollAnimationTimer);
   const pendingHeroPlayIdRef = useRef<string | null>(pendingHeroPlayId);
   const selectedHeroIdRef = useRef<string | null>(selectedHeroId);
   const selectedHeroLocationRef = useRef<'hand' | 'party' | null>(selectedHeroLocation);
@@ -79,13 +86,14 @@ export default function Game() {
   const [inviteCopied, setInviteCopied] = useState(false);
 
   useEffect(() => {
+    rollAnimationTimerRef.current = rollAnimationTimer;
     pendingHeroPlayIdRef.current = pendingHeroPlayId;
     selectedHeroIdRef.current = selectedHeroId;
     selectedHeroLocationRef.current = selectedHeroLocation;
     heroRollAnimationTimerRef.current = heroRollAnimationTimer;
     isHeroRollingRef.current = isHeroRolling;
     playHeroPromptOpenRef.current = playHeroPromptOpen;
-  }, [pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling, playHeroPromptOpen]);
+  }, [rollAnimationTimer, pendingHeroPlayId, selectedHeroId, selectedHeroLocation, heroRollAnimationTimer, isHeroRolling, playHeroPromptOpen]);
 
   useEffect(() => {
     if (!roomCode) return;
@@ -122,7 +130,9 @@ export default function Game() {
       const clientId = client.id ?? '';
       setMyRoll(clientId ? state.diceRolls[clientId] ?? null : null);
 
-      if (!rollAnimationTimer) {
+      // Via the ref: the closure's rollAnimationTimer is stale (this handler is
+      // registered once per room), so reading the state var would always see null.
+      if (!rollAnimationTimerRef.current) {
         setIsRolling(false);
       }
 
@@ -253,6 +263,20 @@ export default function Game() {
     }
   }, [name, socket]);
 
+  // Countdown to the server's scheduled auto-advance (roll_complete /
+  // party_leader_review). The server broadcasts the target timestamp; we just
+  // re-render against the local clock while one is pending.
+  const autoAdvanceAt = gameState?.autoAdvanceAt ?? null;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!autoAdvanceAt) return;
+    const tick = () => setNowTick(Date.now());
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [autoAdvanceAt]);
+  const autoAdvanceSeconds = autoAdvanceAt ? Math.max(0, Math.ceil((autoAdvanceAt - nowTick) / 1000)) : null;
+
   useEffect(() => {
     return () => {
       if (rollAnimationTimer) {
@@ -289,9 +313,13 @@ export default function Game() {
     }
 
     setIsRolling(true);
+    setRollAnimActive(true);
     const timer = setTimeout(() => {
       setIsRolling(false);
       setRollAnimationTimer(null);
+      // Hold the roll card while the dice settle onto their faces before
+      // revealing the results screen.
+      setTimeout(() => setRollAnimActive(false), ROLL_SETTLE_MS);
     }, MIN_ROLL_ANIMATION_MS);
 
     setRollAnimationTimer(timer);
@@ -1073,7 +1101,43 @@ export default function Game() {
           </div>
         ) : (
           <div className="gameBoardPre">
-            <div className="boardPreInner">
+            <div className="boardPreGrid">
+              <aside className="boardPreLeft">
+                <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
+                  <h3>Players ({players.length}/{MAX_PLAYERS})</h3>
+                  <div style={{ display: 'grid', gap: '0.5rem' }}>
+                    {players.map((player, index) => {
+                      const isLeader = player.id === gameState?.lobbyLeaderId;
+                      const isMe = player.id === myId;
+                      const displayName = player.username || player.id;
+                      return (
+                        <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white' }}>
+                          <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
+                            {displayName.charAt(0).toUpperCase()}
+                          </div>
+                          <span style={{ fontWeight: isMe ? 700 : 400, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {displayName}{isMe ? ' (you)' : ''}
+                          </span>
+                          {isLeader && <span title="Lobby leader">👑</span>}
+                          {gameState?.status === 'waiting' && !isLeader && (
+                            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? '#166534' : '#64748b', backgroundColor: player.ready ? '#dcfce7' : '#f1f5f9' }}>
+                              {player.ready ? '✓ Ready' : 'Not ready'}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {gameState?.status === 'waiting' && Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, i) => (
+                      <div key={`empty-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px dashed #cbd5e1', color: '#94a3b8' }}>
+                        <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', border: '1px dashed #cbd5e1', boxSizing: 'border-box' }} />
+                        <span style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for a player…</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+
+              <div className="boardPreInner">
               {gameState?.status === 'finished' && (() => {
                 const winnerId = gameState.winnerId;
                 const winner = winnerId ? gameState.players[winnerId] : undefined;
@@ -1128,12 +1192,12 @@ export default function Game() {
                 );
               })()}
 
-              {gameState?.status === 'rolling' && (
+              {(gameState?.status === 'rolling' || (gameState?.status === 'roll_complete' && rollAnimActive)) && (
                 <FirstRollCard gameState={gameState} myId={myId} handleRoll={handleRoll} isRolling={isRolling} myRoll={myRoll} />
               )}
 
-              {gameState?.status === 'roll_complete' && (
-                <RollCompleteCard gameState={gameState} myId={myId} handleContinue={handleContinue} />
+              {gameState?.status === 'roll_complete' && !rollAnimActive && (
+                <RollCompleteCard gameState={gameState} myId={myId} handleContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
               )}
 
               {gameState?.status === 'party_leader_selection' && (
@@ -1141,47 +1205,16 @@ export default function Game() {
               )}
 
               {gameState?.status === 'party_leader_review' && (
-                <PartyLeaderReviewCard gameState={gameState} myId={myId} handleContinue={handleContinue} />
+                <PartyLeaderReviewCard gameState={gameState} myId={myId} handleContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
               )}
 
-              <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
-                <h3>Players ({players.length}/{MAX_PLAYERS})</h3>
-                <div style={{ display: 'grid', gap: '0.5rem' }}>
-                  {players.map((player, index) => {
-                    const isLeader = player.id === gameState?.lobbyLeaderId;
-                    const isMe = player.id === myId;
-                    const displayName = player.username || player.id;
-                    return (
-                      <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white' }}>
-                        <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
-                          {displayName.charAt(0).toUpperCase()}
-                        </div>
-                        <span style={{ fontWeight: isMe ? 700 : 400, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {displayName}{isMe ? ' (you)' : ''}
-                        </span>
-                        {isLeader && <span title="Lobby leader">👑</span>}
-                        {gameState?.status === 'waiting' && !isLeader && (
-                          <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? '#166534' : '#64748b', backgroundColor: player.ready ? '#dcfce7' : '#f1f5f9' }}>
-                            {player.ready ? '✓ Ready' : 'Not ready'}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {gameState?.status === 'waiting' && Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, i) => (
-                    <div key={`empty-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px dashed #cbd5e1', color: '#94a3b8' }}>
-                      <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', border: '1px dashed #cbd5e1', boxSizing: 'border-box' }} />
-                      <span style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for a player…</span>
-                    </div>
-                  ))}
-                </div>
               </div>
 
-              {gameState && (
-                <div className="lobbyChat">
+              <aside className="boardPreRight">
+                {gameState && (
                   <ChatLogPanel gameState={gameState} entries={gameState.gameLog ?? []} myId={myId} onSend={handleSendChat} />
-                </div>
-              )}
+                )}
+              </aside>
             </div>
           </div>
         )}

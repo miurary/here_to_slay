@@ -246,6 +246,9 @@ export interface GameState {
   pendingChallenge?: PendingChallengeInfo;
   modifierPhase?: ModifierPhaseInfo;
   winnerId?: string;
+  /** Epoch ms when the server will auto-advance out of roll_complete /
+      party_leader_review; clients render a countdown from it. */
+  autoAdvanceAt?: number;
   roomFlags?: Record<string, boolean>;
   forceEndTurn?: string;
   /** Ordered feed of chat messages and action log entries, oldest first. */

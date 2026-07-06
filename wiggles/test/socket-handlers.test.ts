@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Deterministic dice for rollHeroAbility / attackMonster.
 const dice = vi.hoisted(() => ({ next: [3, 3] as [number, number] }));
@@ -71,6 +71,70 @@ describe('connection setup', () => {
     s.handshake.auth.username = '   ';
     handleConnection(s as never);
     expect(gs.players['anon']!.username).toBe('Player 2');
+  });
+});
+
+describe('roll_complete / party_leader_review auto-advance', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const rollingState = () => {
+    const gs = buildGameState({ status: 'rolling', players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    gs.lobbyLeaderId = 'p1';
+    gs.currentRollerId = 'p1';
+    return gs;
+  };
+
+  it('schedules a countdown when the last player rolls, then advances on its own', () => {
+    const gs = rollingState();
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('rollForFirst');
+    connect(h, 'p2').fire('rollForFirst');
+    expect(gs.status).toBe('roll_complete');
+    expect(gs.autoAdvanceAt).toBeTypeOf('number');
+
+    vi.advanceTimersByTime(6000);
+    expect(gs.status).toBe('party_leader_selection');
+    expect(gs.autoAdvanceAt).toBeUndefined();
+    expect(h.io.broadcasts.some(b => b.event === 'stateUpdate')).toBe(true);
+  });
+
+  it('lets the lobby leader skip the countdown, cancelling the timer', () => {
+    const gs = rollingState();
+    const h = createHarness(gs);
+    connect(h, 'p1').fire('rollForFirst');
+    connect(h, 'p2').fire('rollForFirst');
+
+    h.socket('p1').fire('continueGame');
+    expect(gs.status).toBe('party_leader_selection');
+    expect(gs.autoAdvanceAt).toBeUndefined();
+
+    // The cancelled timer must not fire a second transition later.
+    vi.advanceTimersByTime(10000);
+    expect(gs.status).toBe('party_leader_selection');
+  });
+
+  it('auto-advances party_leader_review into in_progress', () => {
+    const gs = buildGameState({
+      status: 'party_leader_selection',
+      players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })],
+      activeMonsters: [makeMonster('m_001')],
+    });
+    gs.lobbyLeaderId = 'p1';
+    gs.partyLeaderSelectionOrder = ['p1', 'p2'];
+    gs.currentSelectionPlayerId = 'p1';
+    gs.availablePartyLeaderCards = [makeCard('pl_a'), makeCard('pl_b')];
+    const h = createHarness(gs);
+
+    connect(h, 'p1').fire('choosePartyLeader', gs.availablePartyLeaderCards[0]!.instanceId);
+    connect(h, 'p2').fire('choosePartyLeader', gs.availablePartyLeaderCards[0]!.instanceId);
+    expect(gs.status).toBe('party_leader_review');
+    expect(gs.autoAdvanceAt).toBeTypeOf('number');
+
+    vi.advanceTimersByTime(6000);
+    expect(gs.status).toBe('in_progress');
+    expect(gs.autoAdvanceAt).toBeUndefined();
+    expect(gs.players['p1']!.actionPoints).toBe(3);
   });
 });
 

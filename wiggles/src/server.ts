@@ -112,6 +112,73 @@ const nextDefaultUsername = (gameState: GameState): string => {
   }
 };
 
+// Push the full room state to every client in the room. Mirrors the
+// per-connection sendRoomUpdate, for callers with no socket (e.g. timers).
+const broadcastRoomUpdate = (roomCode: string) => {
+  const current = getRoomState(roomCode);
+  if (!current) return;
+  getIo().to(roomCode).emit('stateUpdate', current);
+  getIo().to(roomCode).emit('playersUpdated', Object.values(current.players));
+};
+
+// ── Auto-advance for the confirm phases ─────────────────────────────────────
+// roll_complete and party_leader_review advance on their own after this long;
+// the lobby leader's Continue button just skips the wait. autoAdvanceAt is
+// broadcast in the state so every client renders the same countdown.
+const AUTO_ADVANCE_MS = 6000;
+const autoAdvanceTimers = new Map<string, NodeJS.Timeout>();
+
+const clearAutoAdvance = (roomCode: string, gameState?: GameState) => {
+  const timer = autoAdvanceTimers.get(roomCode);
+  if (timer) clearTimeout(timer);
+  autoAdvanceTimers.delete(roomCode);
+  if (gameState) delete gameState.autoAdvanceAt;
+};
+
+// The two leader-confirmed transitions, shared by the auto-advance timer and a
+// manual continueGame.
+const beginPartyLeaderSelection = (gameState: GameState) => {
+  const allPlayerIds = Object.keys(gameState.players);
+  const firstPlayer = gameState.firstPlayerId ?? allPlayerIds[0] ?? '';
+  const selectionOrder = firstPlayer
+    ? [firstPlayer, ...allPlayerIds.filter((id) => id !== firstPlayer)]
+    : [...allPlayerIds];
+
+  gameState.status = 'party_leader_selection';
+  gameState.availablePartyLeaderCards = [...gameState.partyLeaderDeck];
+  gameState.partyLeaderSelectionOrder = selectionOrder;
+  gameState.currentSelectionPlayerId = selectionOrder[0];
+  gameState.diceRolls = {};
+};
+
+const beginInProgress = (gameState: GameState) => {
+  gameState.status = 'in_progress';
+  gameState.activePlayerId = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
+  for (const pid of Object.keys(gameState.players)) {
+    const p = gameState.players[pid];
+    if (!p) continue;
+    p.actionPoints = 3;
+  }
+};
+
+const scheduleAutoAdvance = (roomCode: string, gameState: GameState) => {
+  clearAutoAdvance(roomCode, gameState);
+  gameState.autoAdvanceAt = Date.now() + AUTO_ADVANCE_MS;
+  const timer = setTimeout(() => {
+    autoAdvanceTimers.delete(roomCode);
+    const gs = getRoomState(roomCode);
+    if (!gs) return;
+    delete gs.autoAdvanceAt;
+    if (gs.status === 'roll_complete') beginPartyLeaderSelection(gs);
+    else if (gs.status === 'party_leader_review') beginInProgress(gs);
+    else return;
+    broadcastRoomUpdate(roomCode);
+  }, AUTO_ADVANCE_MS);
+  // Don't let a pending countdown keep the process alive on shutdown.
+  timer.unref?.();
+  autoAdvanceTimers.set(roomCode, timer);
+};
+
 // The per-connection handler. Exported so tests can drive it with a fake socket
 // (and fake io via setIo) without booting a real server. It resolves the live io
 // through getIo() so broadcasts go to whichever server instance is registered.
@@ -1171,6 +1238,7 @@ const handleConnection = (socket: Socket) => {
       gameState.turnNumber = 1;
       gameState.phase = 'DRAW';
       gameState.status = 'roll_complete';
+      scheduleAutoAdvance(socket.data.roomCode as string, gameState);
     }
 
     sendRoomUpdate();
@@ -1188,26 +1256,13 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (gameState.status === 'roll_complete') {
-      const allPlayerIds = Object.keys(gameState.players);
-      const firstPlayer = gameState.firstPlayerId ?? allPlayerIds[0] ?? '';
-      const selectionOrder = firstPlayer
-        ? [firstPlayer, ...allPlayerIds.filter((id) => id !== firstPlayer)]
-        : [...allPlayerIds];
+    // Manual continue skips whatever remains of the auto-advance countdown.
+    clearAutoAdvance(socket.data.roomCode as string, gameState);
 
-      gameState.status = 'party_leader_selection';
-      gameState.availablePartyLeaderCards = [...gameState.partyLeaderDeck];
-      gameState.partyLeaderSelectionOrder = selectionOrder;
-      gameState.currentSelectionPlayerId = selectionOrder[0];
-      gameState.diceRolls = {};
+    if (gameState.status === 'roll_complete') {
+      beginPartyLeaderSelection(gameState);
     } else {
-      gameState.status = 'in_progress';
-      gameState.activePlayerId = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
-      for (const pid of Object.keys(gameState.players)) {
-        const p = gameState.players[pid];
-        if (!p) continue;
-        p.actionPoints = 3;
-      }
+      beginInProgress(gameState);
     }
 
     sendRoomUpdate();
@@ -1309,6 +1364,7 @@ const handleConnection = (socket: Socket) => {
       if (gameState.activeMonsters.length === 0) {
         gameState.activeMonsters = drawCards(gameState.monsterDeck, 3) as MonsterInstance[];
       }
+      scheduleAutoAdvance(socket.data.roomCode as string, gameState);
     }
 
     sendRoomUpdate();
@@ -1330,6 +1386,7 @@ const handleConnection = (socket: Socket) => {
     gameState.discardedMonsters = [];
     gameState.discardPile = [];
     gameState.diceRolls = {};
+    clearAutoAdvance(socket.data.roomCode as string, gameState);
     pendingChallenges.delete(socket.data.roomCode as string);
     delete gameState.pendingChallenge;
     modifierPhases.delete(socket.data.roomCode as string);
