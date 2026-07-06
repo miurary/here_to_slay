@@ -60,11 +60,13 @@ export interface BuildPlayerInput {
   partyLeaderId?: string;
   slainMonsters?: CardInstance[];
   temporaryModifiers?: PlayerState['temporaryModifiers'];
+  ready?: boolean;
 }
 
 export const buildPlayer = (input: BuildPlayerInput): PlayerState => ({
   id: input.id,
   username: input.username ?? input.id,
+  ready: input.ready ?? false,
   actionPoints: input.actionPoints ?? 3,
   partyLeaderId: input.partyLeaderId,
   slainMonsters: input.slainMonsters ?? [],
@@ -111,6 +113,7 @@ export const buildGameState = (input: BuildStateInput): GameState => {
     currentRollerId: undefined,
     firstPlayerId: undefined,
     targetMonstersToWin: input.targetMonstersToWin,
+    gameLog: [],
     ...(input.roomFlags ? { roomFlags: input.roomFlags } : {}),
   };
 };

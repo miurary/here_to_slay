@@ -196,7 +196,7 @@ button {
 /* Row 1 — header: room code + username + back */
 .gameHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -258,6 +258,34 @@ button {
 .boardCenter {
   min-width: 0;
 }
+/* Right column: active monsters stacked over a chat/log dock. Positioned so the
+   chat's expanded overlay can cover the monsters above it. */
+.boardRight {
+  position: relative;
+  overflow: hidden;
+}
+.boardRightMonsters {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The left column never scrolls: the leader art scales to fit instead. */
+.boardLeft {
+  overflow: hidden;
+}
+/* End Turn + Quit side by side, pinned to the bottom of the left column so they
+   line up with the bottom of the party and active monsters. */
+.boardLeftActions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin-top: auto;
+}
+.boardLeftActions > button {
+  flex: 1;
+}
 /* Pre-game states (waiting/rolling/etc.) render centered here */
 .gameBoardPre {
   display: flex;
@@ -275,6 +303,15 @@ button {
   gap: 16px;
 }
 
+/* Pre-game chat: fixed-height docked panel under the player list.
+   position:relative anchors the expand overlay, same as .footerChat. */
+.lobbyChat {
+  position: relative;
+  display: flex;
+  height: 240px;
+  max-width: 520px;
+}
+
 /* Row 4 — footer: deck/discard | hand button | opponents */
 .gameFooter {
   display: flex;
@@ -289,12 +326,47 @@ button {
   flex-shrink: 0;
   overflow: auto;
 }
+/* Bottom-right chat: mirrors the Active Monsters column width above it, and
+   fills the footer (hand) height. position:relative anchors the expand overlay. */
+.footerChat {
+  flex: 0 1 340px;
+  min-width: 280px;
+  max-width: 340px;
+  display: flex;
+  position: relative;
+}
 .footerHand {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.footerActions {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-left: auto;
   flex-shrink: 0;
   align-items: stretch;
+  align-self: center;
+}
+
+.gameHeaderOpponents {
+  flex: 3 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.gameHeaderStatus {
+  flex: 2 1 0;
+  min-width: 0;
+  display: flex;
+}
+.gameHeaderStatus > * {
+  width: 100%;
 }
 .footerOpponents {
   flex: 1;

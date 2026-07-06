@@ -8,6 +8,7 @@ import type { Socket } from 'socket.io';
 import { emitAbilityPrompt, buildPromptId, getIo, modifierPhases } from './state.js';
 import type { ModifierPhaseState } from './state.js';
 import { getHeroEffectiveClass, applyWinIfMet } from './util.js';
+import { logEvent, nameOf } from './log.js';
 import { drawCardsForPlayer } from './effects.js';
 import { getSlainMonsterRollBonus, getOpponentsWithModifiers, updateModifierPhaseGameState } from './rolls.js';
 
@@ -139,15 +140,26 @@ const applyMonsterAttackEffects = (
     effectText = monsterTemplate.lowerBoundText ?? '';
   }
 
+  const slew = finalTotal >= upperBound;
+
   // Broadcast result immediately before any prompts
   getIo().to(roomCode).emit('monsterAttackResult', {
     attackerName: player.username ?? socket.id,
     monsterName,
     roll: finalTotal,
     requiredRoll: upperBound,
-    slew: finalTotal >= upperBound,
+    slew,
     effectText: effectText || 'Nothing happens.',
   });
+
+  logEvent(
+    gameState,
+    'action',
+    slew
+      ? `${nameOf(gameState, player.id)} slew ${monsterName}! (rolled ${finalTotal})`
+      : `${nameOf(gameState, player.id)}'s attack on ${monsterName} failed (rolled ${finalTotal}, needed ${upperBound}).`,
+    { id: player.id, username: player.username },
+  );
 
   for (const effect of effects) {
     if (effect.action === 'SLAY') {

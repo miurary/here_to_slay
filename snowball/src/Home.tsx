@@ -57,7 +57,7 @@ export default function Home() {
     }
   };
 
-  const handleJoinRoom = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleJoinRoom = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedRoom = roomCode.trim().toUpperCase();
     if (!trimmedRoom) {
@@ -72,7 +72,21 @@ export default function Home() {
 
     localStorage.setItem('username', name.trim());
     setNameSaved(true);
-    navigate(`/game/${trimmedRoom}`);
+    setStatus('Joining room...');
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/room/${trimmedRoom}`);
+      const data = await response.json();
+
+      if (!response.ok || !data.exists) {
+        setStatus(`Room ${trimmedRoom} not found.`);
+        return;
+      }
+
+      navigate(`/game/${trimmedRoom}`);
+    } catch {
+      setStatus('Unable to connect to the game server.');
+    }
   };
 
   return (

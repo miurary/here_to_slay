@@ -1,79 +1,50 @@
+import type { Dispatch, SetStateAction } from 'react';
 import type { GameState } from '../../../../shared/types';
 import CardArt from '../CardArt';
+import PartyLeaderModal from './PartyLeaderModal';
 
 interface PartyLeaderCardProps {
     gameState: GameState;
     myId: string;
     isMyTurn: boolean;
     onUsePartyLeaderAbility: () => void;
+    actionMessage: string | null;
+    setActionMessage: Dispatch<SetStateAction<string | null>>;
+    modalOpen: boolean;
+    setModalOpen: Dispatch<SetStateAction<boolean>>;
+    abilityPromptActive: boolean;
 }
 
-export default function PartyLeaderCard({ gameState, myId, isMyTurn, onUsePartyLeaderAbility }: PartyLeaderCardProps) {
+export default function PartyLeaderCard({ gameState, myId, isMyTurn, onUsePartyLeaderAbility, actionMessage, setActionMessage, modalOpen, setModalOpen, abilityPromptActive }: PartyLeaderCardProps) {
     const player = gameState.players[myId];
     const partyLeaderCard = player?.zones.party.find(c => c.cardType === 'party_leader');
     if (!partyLeaderCard) return null;
 
     const template = gameState.cardTemplates[partyLeaderCard.templateId];
     const cardName = template?.name || partyLeaderCard.templateId;
-    const isOptional = template?.effect?.isOptional === true;
-    const alreadyUsed = partyLeaderCard.effectUsedThisTurn;
-    const canUse = isMyTurn && isOptional && !alreadyUsed;
 
     return (
-        <div style={{ width: '100%', boxSizing: 'border-box', padding: '1rem', border: '2px solid #333', borderRadius: '8px', backgroundColor: '#faf7f0' }}>
-            <h3 style={{ marginTop: 0 }}>Your Party Leader</h3>
-            <CardArt cardId={partyLeaderCard.templateId} name={cardName} style={{ marginBottom: '0.5rem' }} />
-            {isOptional ? (
-                <>
-                    <div style={{
-                        display: 'inline-block',
-                        padding: '0.2rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: 'bold',
-                        backgroundColor: alreadyUsed ? '#eee' : '#fff3cd',
-                        color: alreadyUsed ? '#999' : '#856404',
-                        border: `1px solid ${alreadyUsed ? '#ccc' : '#ffc107'}`,
-                        marginBottom: '0.6rem',
-                    }}>
-                        {alreadyUsed ? 'Used this turn' : 'Once per turn'}
-                    </div>
-                    <button
-                        type="button"
-                        disabled={!canUse}
-                        onClick={onUsePartyLeaderAbility}
-                        style={{
-                            display: 'block',
-                            width: '100%',
-                            padding: '0.5rem 0.75rem',
-                            borderRadius: '6px',
-                            border: 'none',
-                            backgroundColor: canUse ? '#8e44ad' : '#ccc',
-                            color: 'white',
-                            cursor: canUse ? 'pointer' : 'not-allowed',
-                            fontWeight: 'bold',
-                            fontSize: '0.85rem',
-                        }}
-                    >
-                        Use Ability
-                    </button>
-                    {!isMyTurn && !alreadyUsed && (
-                        <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.4rem' }}>Only on your turn.</div>
-                    )}
-                </>
-            ) : (
-                <div style={{
-                    display: 'inline-block',
-                    padding: '0.2rem 0.5rem',
-                    borderRadius: '4px',
-                    fontSize: '0.7rem',
-                    fontWeight: 'bold',
-                    backgroundColor: '#e8f4fd',
-                    color: '#0c5460',
-                    border: '1px solid #bee5eb',
-                }}>
-                    Passive — triggers automatically
-                </div>
+        <div style={{ width: '100%', boxSizing: 'border-box', padding: '1rem', border: '2px solid #333', borderRadius: '8px', backgroundColor: '#faf7f0', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Your Party Leader</h3>
+            {/* Clickable art scales to the remaining height so the column never scrolls. */}
+            <div
+                onClick={() => { setActionMessage(null); setModalOpen(true); }}
+                title="View party leader"
+                style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            >
+                <CardArt cardId={partyLeaderCard.templateId} name={cardName} fit />
+            </div>
+            {modalOpen && (
+                <PartyLeaderModal
+                    gameState={gameState}
+                    myId={myId}
+                    isMyTurn={isMyTurn}
+                    onUsePartyLeaderAbility={onUsePartyLeaderAbility}
+                    actionMessage={actionMessage}
+                    setActionMessage={setActionMessage}
+                    abilityPromptActive={abilityPromptActive}
+                    onClose={() => { setActionMessage(null); setModalOpen(false); }}
+                />
             )}
         </div>
     );

@@ -7,6 +7,7 @@ import type {
   ClientToServerEvents, ServerToClientEvents,
   Effect, GameState, MonsterInstance,
 } from '../../shared/src/types.js';
+import { logEvent, nameOf } from './log.js';
 import { drawCards, initializeDecks, loadAllCardTemplates } from './cards.js';
 import {
   rooms, getRoomState, setIo, getIo, emitAbilityPrompt, buildPromptId,
@@ -68,7 +69,8 @@ const createInitialGameState = (roomCode: string): GameState => ({
   lobbyLeaderId: undefined,
   currentRollerId: undefined,
   firstPlayerId: undefined,
-  targetMonstersToWin: undefined
+  targetMonstersToWin: undefined,
+  gameLog: []
 });
 
 app.post('/api/create-room', (_req, res) => {
@@ -110,7 +112,7 @@ const handleConnection = (socket: Socket) => {
   const gameState = getRoomState(roomCode);
 
   if (!roomCode || !gameState) {
-    socket.emit('actionFailed', 'Room not found or room code missing.');
+    socket.emit('roomNotFound', 'Room not found or room code missing.');
     socket.disconnect();
     return;
   }
@@ -130,6 +132,7 @@ const handleConnection = (socket: Socket) => {
     gameState.players[socket.id] = {
       id: socket.id,
       username,
+      ready: false,
       actionPoints: 3,
       partyLeaderId: undefined,
       slainMonsters: [],
@@ -159,13 +162,42 @@ const handleConnection = (socket: Socket) => {
 
   sendRoomUpdate();
 
+  socket.on('sendChat', (message) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+    const sender = gameState.players[socket.id];
+    if (!sender) return;
+    const text = (message ?? '').toString().trim().slice(0, 500);
+    if (!text) return;
+    logEvent(gameState, 'chat', text, { id: socket.id, username: sender.username });
+    sendRoomUpdate();
+  });
+
+  socket.on('toggleReady', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'waiting') return;
+    const player = gameState.players[socket.id];
+    if (!player) return;
+    player.ready = !player.ready;
+    sendRoomUpdate();
+  });
+
   socket.on('startGame', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'waiting') {
       return;
     }
 
-    if (Object.keys(gameState.players).length === 0) {
+    if (Object.keys(gameState.players).length < 2) {
+      socket.emit('actionFailed', 'Need at least 2 players to start.');
+      return;
+    }
+
+    // The lobby leader starts the game, so only everyone else has to ready up.
+    const allReady = Object.values(gameState.players)
+      .every(p => p.id === gameState.lobbyLeaderId || p.ready);
+    if (!allReady) {
+      socket.emit('actionFailed', 'All players must be ready before starting.');
       return;
     }
 
@@ -183,6 +215,7 @@ const handleConnection = (socket: Socket) => {
       if (!player) continue;
       const cards = drawCards(gameState.mainDeck, 5);
       player.zones.hand.push(...cards);
+      player.ready = false;
     }
 
     gameState.status = 'rolling';
@@ -192,6 +225,7 @@ const handleConnection = (socket: Socket) => {
     gameState.currentSelectionPlayerId = undefined;
     gameState.currentRollerId = playerIds[0] ?? undefined;
     gameState.turnNumber = 0;
+    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} started the game.`, { id: socket.id, username: gameState.players[socket.id]?.username });
 
     sendRoomUpdate();
   });
@@ -227,6 +261,7 @@ const handleConnection = (socket: Socket) => {
     if (!card) return;
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} drew a card.`, { id: socket.id, username: player.username });
 
     socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
 
@@ -255,6 +290,7 @@ const handleConnection = (socket: Socket) => {
     player.zones.hand = [];
     drawCardsForPlayer(gameState, player, 5);
     player.actionPoints = (player.actionPoints ?? 0) - 3;
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} mulliganed their hand.`, { id: socket.id, username: player.username });
 
     sendRoomUpdate();
   });
@@ -301,6 +337,7 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} played ${gameState.cardTemplates[playedCard.templateId]?.name ?? 'a hero'}.`, { id: socket.id, username: player.username });
 
     const roomCode = socket.data.roomCode as string;
     const eligibleChallengerIds = getEligibleChallengerIds(gameState, socket.id);
@@ -358,6 +395,7 @@ const handleConnection = (socket: Socket) => {
     player.actionPoints = (player.actionPoints ?? 0) - 1;
     const [removedMagicCard] = player.zones.hand.splice(cardIndex, 1);
     if (!removedMagicCard) { sendRoomUpdate(); return; }
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} played ${template.name ?? 'a magic card'}.`, { id: socket.id, username: player.username });
 
     const magicRoomCode = socket.data.roomCode as string;
     const steps: Effect[] = template.effect.steps ?? [template.effect as unknown as Effect];
@@ -439,6 +477,7 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} equipped ${itemTemplate?.name ?? 'an item'} to ${gameState.cardTemplates[targetHero.templateId]?.name ?? 'a hero'}.`, { id: socket.id, username: player.username });
 
     const itemRoomCode = socket.data.roomCode as string;
     const itemEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
@@ -937,6 +976,7 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 2;
+    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} is attacking ${monsterTemplate.name ?? 'a monster'}.`, { id: socket.id, username: player.username });
     executeMonsterAttackRoll(roomCode, socket, gameState, player, monster, monsterTemplate, sendRoomUpdate);
   });
 
@@ -1211,6 +1251,8 @@ const handleConnection = (socket: Socket) => {
     heroesPlayedFromAbilityThisTurn.delete(socket.data.roomCode as string);
     delete gameState.roomFlags;
 
+    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} ended their turn. It is now ${nameOf(gameState, nextPlayerId)}'s turn.`, { id: socket.id, username: currentPlayer?.username });
+
     sendRoomUpdate();
   });
 
@@ -1243,6 +1285,7 @@ const handleConnection = (socket: Socket) => {
 
     player.zones.party = [chosenCard];
     player.partyLeaderId = chosenCard.templateId;
+    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} chose ${gameState.cardTemplates[chosenCard.templateId]?.name ?? 'a party leader'} as their party leader.`, { id: socket.id, username: player.username });
 
     const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
       (id) => id === socket.id
@@ -1297,7 +1340,12 @@ const handleConnection = (socket: Socket) => {
       player.actionPoints = 3;
       player.partyLeaderId = undefined;
       player.slainMonsters = [];
+      player.ready = false;
     }
+
+    // Fresh game back in the lobby — start the log over with the reset notice.
+    gameState.gameLog = [];
+    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} reset the game.`, { id: socket.id, username: gameState.players[socket.id]?.username });
 
     sendRoomUpdate();
   });

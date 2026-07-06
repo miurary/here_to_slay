@@ -1,7 +1,8 @@
-import type { GameState } from "../../../../shared/types";
-import { getTemplateForInstanceId } from "../../utils/gameUtils";
-import CardArt from "../CardArt";
 import type { Dispatch, SetStateAction } from 'react';
+import type { GameState } from "../../../../shared/types";
+import { getClassColor, HERO_CLASSES } from "../../utils/classColors";
+import { getPlayerColor } from "../../utils/gameUtils";
+import OpponentPartyModal from "./OpponentPartyModal";
 
 interface OpponentInformationCardProps {
     gameState: GameState;
@@ -12,92 +13,100 @@ interface OpponentInformationCardProps {
     setViewedItemId: Dispatch<SetStateAction<string | null>>;
 }
 
+const dotBase: React.CSSProperties = {
+    width: 10, height: 10, borderRadius: '50%', boxSizing: 'border-box', flex: '0 0 auto',
+};
+
 export default function OpponentInformationCard({ gameState, myId, selectedOpponentPartyId, viewedItemId, setSelectedOpponentPartyId, setViewedItemId }: OpponentInformationCardProps) {
+    const targetMonsters = gameState.targetMonstersToWin ?? 3;
+
     return (
-        <div style={{ padding: '1rem', border: '1px solid #bbb', borderRadius: '8px', backgroundColor: 'white' }}>
-            <h3>Opponents' Party Leaders</h3>
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
+        <div style={{ padding: '0.5rem 0.625rem', border: '1px solid #bbb', borderRadius: '8px', backgroundColor: 'white' }}>
+            <h4 style={{ margin: '0 0 0.4rem', fontSize: '0.8rem', color: '#475569' }}>Opponents' Parties</h4>
+            {/* The container is a fixed width (see .gameHeaderOpponents); each card
+                sizes to its content (as small as possible) and is left-aligned. */}
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'stretch', flexWrap: 'wrap' }}>
             {Object.values(gameState.players)
                 .filter((player) => player.id !== myId)
                 .map((player) => {
-                const chosen = player.zones.party[0];
-                const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
+                // Which hero classes the player has covered — counts the party
+                // leader plus every card in the party zone (not a per-card count).
+                const presentClasses = new Set<string>();
+                const leaderClass = player.partyLeaderId
+                    ? gameState.cardTemplates[player.partyLeaderId]?.class
+                    : undefined;
+                if (leaderClass) presentClasses.add(leaderClass.toLowerCase());
+                for (const card of player.zones.party) {
+                    const cls = gameState.cardTemplates[card.templateId]?.class;
+                    if (cls) presentClasses.add(cls.toLowerCase());
+                }
+                const slainCount = player.slainMonsters?.length ?? 0;
                 return (
-                    <div key={player.id} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fafafa' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
-                        <div>
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
-                        {chosen ? (
-                            <>
-                            <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0.25rem 0' }} />
-                            </>
-                        ) : (
-                            <div style={{ color: '#999' }}>No leader chosen</div>
-                        )}
+                    <div
+                        key={player.id}
+                        style={{ flex: '0 0 auto', width: 'min-content', padding: '0.35rem 0.45rem', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fafafa', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}
+                    >
+                        {/* Row 1: name + View button */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
+                            <div style={{ fontWeight: 'bold', fontSize: '0.8rem', color: getPlayerColor(gameState, player.id), minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {player.username || 'Player'}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedOpponentPartyId(player.id)}
+                                style={{ padding: '0.1rem 0.4rem', fontSize: '0.7rem', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', flex: '0 0 auto' }}
+                            >
+                                View
+                            </button>
                         </div>
-                        <button
-                        type="button"
-                        onClick={() => setSelectedOpponentPartyId((current) => current === player.id ? null : player.id)}
-                        style={{ padding: '0.5rem 0.75rem', backgroundColor: selectedOpponentPartyId === player.id ? '#6c757d' : '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                        >
-                        {selectedOpponentPartyId === player.id ? 'Hide Party' : 'View Party'}
-                        </button>
-                    </div>
-                    <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#333' }}>
-                        Hand size: {player.zones.hand.length}
-                    </div>
+                        {/* Row 2: one dot per class — lit in the class color when the
+                            player has that class covered, otherwise an empty outline. */}
+                        <div title="Hero classes in party" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', flexWrap: 'nowrap' }}>
+                            {HERO_CLASSES.map((cls) => {
+                                const present = presentClasses.has(cls);
+                                return (
+                                    <span
+                                        key={cls}
+                                        title={`${cls}${present ? '' : ' (missing)'}`}
+                                        style={{
+                                            ...dotBase,
+                                            backgroundColor: present ? getClassColor(cls) : 'transparent',
+                                            border: present ? 'none' : '1px solid #ccc',
+                                        }}
+                                    />
+                                );
+                            })}
+                        </div>
+                        {/* Row 3: hand size (left) + monster tracker (right) */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', marginTop: 'auto' }}>
+                            <div title="Cards in hand" style={{ fontSize: '0.7rem', color: '#333', flex: '0 0 auto' }}>
+                                ✋ {player.zones.hand.length}
+                            </div>
+                            <div title={`${slainCount} of ${targetMonsters} monsters slain`} style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                                {Array.from({ length: targetMonsters }).map((_, i) => (
+                                    <span
+                                        key={i}
+                                        style={{
+                                            ...dotBase,
+                                            backgroundColor: i < slainCount ? '#212529' : 'transparent',
+                                            border: '2px solid #212529',
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 );
                 })}
             </div>
             {selectedOpponentPartyId && gameState.players[selectedOpponentPartyId] && (
-            <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #007bff', borderRadius: '8px', backgroundColor: '#eef5ff' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
-                <div>
-                    <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{gameState.players[selectedOpponentPartyId].username || 'Player'}'s Party</div>
-                    <div style={{ fontSize: '0.85rem', color: '#555' }}>Party size: {gameState.players[selectedOpponentPartyId].zones.party.length}</div>
-                </div>
-                <button
-                    type="button"
-                    onClick={() => setSelectedOpponentPartyId(null)}
-                    style={{ padding: '0.5rem 0.75rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                >
-                    Close
-                </button>
-                </div>
-                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                {gameState.players[selectedOpponentPartyId].zones.party.length > 0 ? (
-                    gameState.players[selectedOpponentPartyId].zones.party.map((card) => {
-                    const template = gameState.cardTemplates[card.templateId];
-                    const equippedTemplate = getTemplateForInstanceId(gameState, card.equippedItem);
-                    return (
-                        <div key={card.instanceId} style={{ padding: '0.75rem', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: 'white' }}>
-                        <CardArt cardId={card.templateId} name={template?.name} style={{ margin: '0 auto 0.4rem' }} />
-                        {card.equippedItem && (
-                            <div style={{ marginTop: '0.5rem' }}>
-                            <div style={{ fontSize: '0.85rem', color: '#333' }}>
-                                Equipped: <button type="button" onClick={() => setViewedItemId(card.equippedItem ?? null)} style={{ background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', padding: 0 }}>{equippedTemplate?.name || 'Item'}</button>
-                            </div>
-                            {viewedItemId === card.equippedItem && equippedTemplate && (
-                                <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '6px' }}>
-                                <div style={{ fontWeight: 'bold' }}>{equippedTemplate.name}</div>
-                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{equippedTemplate.type}</div>
-                                <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#333' }}>{equippedTemplate.abilityText ?? ''}</div>
-                                <div style={{ marginTop: '0.5rem' }}>
-                                    <button type="button" onClick={() => setViewedItemId(null)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>Close</button>
-                                </div>
-                                </div>
-                            )}
-                            </div>
-                        )}
-                        </div>
-                    );
-                    })
-                ) : (
-                    <div style={{ color: '#666' }}>No party cards to display.</div>
-                )}
-                </div>
-            </div>
+                <OpponentPartyModal
+                    gameState={gameState}
+                    playerId={selectedOpponentPartyId}
+                    viewedItemId={viewedItemId}
+                    setViewedItemId={setViewedItemId}
+                    onClose={() => { setSelectedOpponentPartyId(null); setViewedItemId(null); }}
+                />
             )}
         </div>
     )

@@ -6,7 +6,8 @@ import './App.css';
 
 import FirstRollCard from './components/game/FirstRollCard';
 import GameStatusCard from './components/game/GameStatusCard';
-import HandCard from './components/game/HandCard';
+import CardArt from './components/CardArt';
+import HandFan from './components/game/HandFan';
 import HeroAbilityModal from './components/game/HeroAbilityModal';
 import PartyCard from './components/game/PartyCard';
 import PartyLeaderCard from './components/game/PartyLeaderCard';
@@ -17,7 +18,12 @@ import EndTurnButton from './components/game/EndTurnButton';
 import MainDeckCard from './components/game/MainDeckCard';
 import DiscardPileCard from './components/game/DiscardPileCard';
 import ActiveMonstersSidebarCard from './components/game/ActiveMonstersSidebarCard';
+import ChatLogPanel from './components/game/ChatLogPanel';
 import OpponentInformationCard from './components/game/OpponentInformationCard';
+
+const MAX_PLAYERS = 6;
+// Fixed lobby avatar palette, assigned by join order.
+const AVATAR_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0891b2'];
 
 export default function Game() {
   const { roomCode: rawRoomCode } = useParams();
@@ -33,9 +39,9 @@ export default function Game() {
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [showDrawPrompt, setShowDrawPrompt] = useState(false);
   const [showDiscardPile, setShowDiscardPile] = useState(false);
-  const [showHand, setShowHand] = useState(false);
+  const [handDetailId, setHandDetailId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [justDrew, setJustDrew] = useState(false);
+  const [leaderModalOpen, setLeaderModalOpen] = useState(false);
   const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
   const [selectedHeroLocation, setSelectedHeroLocation] = useState<'hand' | 'party' | null>(null);
   const [heroRollResult, setHeroRollResult] = useState<string | null>(null);
@@ -50,6 +56,7 @@ export default function Game() {
   const [multiSelected, setMultiSelected] = useState<string[]>([]);
   const [playHeroRollResult, setPlayHeroRollResult] = useState<string | null>(null);
   const [isHeroRolling, setIsHeroRolling] = useState(false);
+  const [rolledDice, setRolledDice] = useState<{ die1: number; die2: number } | null>(null);
   const pendingHeroPlayIdRef = useRef<string | null>(pendingHeroPlayId);
   const selectedHeroIdRef = useRef<string | null>(selectedHeroId);
   const selectedHeroLocationRef = useRef<'hand' | 'party' | null>(selectedHeroLocation);
@@ -69,6 +76,7 @@ export default function Game() {
   const [status, setStatus] = useState<string>(!roomCode ? 'Missing room code.' : 'Connecting...');
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   useEffect(() => {
     pendingHeroPlayIdRef.current = pendingHeroPlayId;
@@ -136,6 +144,7 @@ export default function Game() {
     client.on('heroRollResult', (result) => {
       console.log("onHeroRollResult: ", result);
       console.log("pendingHeroPlayId: ", pendingHeroPlayIdRef.current);
+      setRolledDice({ die1: result.die1, die2: result.die2 });
       if (result.heroInstanceId === pendingHeroPlayIdRef.current) {
         console.log("Setting play hero roll result");
         setPlayHeroRollResult(result.message);
@@ -178,11 +187,6 @@ export default function Game() {
       setTimeout(() => setActionMessage(null), 2500);
     });
 
-    client.on('cardDrawn', () => {
-      setJustDrew(true);
-      setTimeout(() => setJustDrew(false), 800);
-    });
-
     client.on('heroPlayAccepted', (heroInstanceId: string) => {
       setPendingHeroPlayId(heroInstanceId);
       setSelectedHeroId(heroInstanceId);
@@ -190,8 +194,6 @@ export default function Game() {
       setHeroRollResult(null);
       setPlayHeroPromptOpen(true);
       setPlayHeroRollResult(null);
-      // The ability prompt is now its own modal: close the hand so it takes over.
-      setShowHand(false);
     });
 
     client.on('challengeResolved', (data: ChallengeResolvedData) => {
@@ -205,6 +207,11 @@ export default function Game() {
     });
 
     client.on('roomFull', (msg: string) => {
+      client.disconnect();
+      navigate('/', { state: { error: msg } });
+    });
+
+    client.on('roomNotFound', (msg: string) => {
       client.disconnect();
       navigate('/', { state: { error: msg } });
     });
@@ -233,6 +240,7 @@ export default function Game() {
       client.off('challengeResolved');
       client.off('monsterAttackResult');
       client.off('roomFull');
+      client.off('roomNotFound');
       client.off('connect_error');
       client.disconnect();
     };
@@ -258,6 +266,21 @@ export default function Game() {
 
   const handleStart = () => {
     socket?.emit('startGame');
+  };
+
+  const handleToggleReady = () => {
+    socket?.emit('toggleReady');
+  };
+
+  const handleCopyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      setActionMessage('Could not copy the invite link — copy the page URL instead.');
+      setTimeout(() => setActionMessage(null), 3000);
+    }
   };
 
   const handleRoll = () => {
@@ -300,6 +323,10 @@ export default function Game() {
 
   const handleEndTurn = () => {
     socket?.emit('endTurn');
+  };
+
+  const handleSendChat = (message: string) => {
+    socket?.emit('sendChat', message);
   };
 
   const handlePlayHero = (instanceId: string) => {
@@ -370,6 +397,7 @@ export default function Game() {
 
     setIsHeroRolling(true);
     setPlayHeroRollResult(null);
+    setRolledDice(null);
     const timer = setTimeout(() => {
       setIsHeroRolling(false);
       setHeroRollAnimationTimer(null);
@@ -412,6 +440,29 @@ export default function Game() {
     socket?.emit('playMagic', instanceId);
   };
 
+  // Play whichever card is open in the hand card-detail modal, by type, then
+  // close the modal. For a hero this triggers heroPlayAccepted, which opens the
+  // ability-roll modal (HeroAbilityModal).
+  const playHandCard = (card: CardInstance) => {
+    if (!gameState || gameState.status !== 'in_progress') return;
+    if (card.cardType === 'hero') {
+      handlePlayHero(card.instanceId);
+    } else if (card.cardType === 'magic') {
+      handlePlayMagic(card.instanceId);
+    } else if (card.cardType === 'item') {
+      const tmpl = gameState.cardTemplates[card.templateId];
+      const isCursed = (tmpl?.subtype as string | undefined)?.toLowerCase() === 'cursed';
+      if (isCursed) {
+        handleInitiateCursedItemPlay(card.instanceId);
+      } else {
+        setPendingItemPlayId(card.instanceId);
+        setItemPlayPromptOpen(true);
+        setViewedItemId(null);
+      }
+    }
+    setHandDetailId(null);
+  };
+
   const handleInitiateCursedItemPlay = (instanceId: string) => {
     if (!gameState || gameState.status !== 'in_progress') return;
     setPendingCursedItemPlayId(instanceId);
@@ -444,6 +495,7 @@ export default function Game() {
 
     setIsHeroRolling(true);
     setHeroRollResult(null);
+    setRolledDice(null);
     socket?.emit('rollHeroAbility', selectedHeroId);
   };
 
@@ -482,7 +534,6 @@ export default function Game() {
   const myPlayer = gameState?.players[myId];
   const selectedHero = myPlayer?.zones.hand.find((card) => card.instanceId === selectedHeroId)
     ?? myPlayer?.zones.party.find((card) => card.instanceId === selectedHeroId);
-  const selectedHeroAP = selectedHeroLocation === 'hand' ? myPlayer?.actionPoints ?? 0 : 0;
   const isMyTurn = gameState?.status === 'in_progress' && gameState.activePlayerId === myId;
 
   const getChallengeCardBonus = (card: CardInstance): number => {
@@ -527,39 +578,51 @@ export default function Game() {
 
   return (
     <div className="gameShell" onClick={() => setSelectedHeroId(null)}>
-      <style>{`@keyframes spin {0% { transform: rotateX(0deg) rotateY(0deg); }100% { transform: rotateX(360deg) rotateY(360deg); }}`}</style>
 
       {/* ── Fixed-overlay modals (render regardless of layout) ─────────────── */}
-      {isInGame && showHand && gameState && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }} onClick={() => setShowHand(false)}>
-          <div style={{ backgroundColor: 'white', padding: '1.25rem', borderRadius: '16px', width: 'min(94vw, 1100px)', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <h2 style={{ margin: 0 }}>Your Hand</h2>
-              <button type="button" onClick={() => setShowHand(false)} className="primaryButton">Close</button>
+      {isInGame && handDetailId && gameState && (() => {
+        const card = gameState.players[myId]?.zones.hand.find(c => c.instanceId === handDetailId);
+        if (!card) return null;
+        const template = gameState.cardTemplates[card.templateId];
+        const reactive = card.cardType === 'challenge' || card.cardType === 'modifier';
+        const ap = gameState.players[myId]?.actionPoints ?? 0;
+        const canPlay = isMyTurn && !reactive && ap >= 1;
+        const label = card.cardType === 'hero' ? 'Play Hero (-1 AP)'
+          : card.cardType === 'item' ? 'Use Item (-1 AP)'
+          : 'Play Magic (-1 AP)';
+        return (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }} onClick={() => setHandDetailId(null)}>
+            <div style={{ backgroundColor: 'white', padding: '1.25rem', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
+                <button type="button" onClick={() => setHandDetailId(null)} className="primaryButton">Close</button>
+              </div>
+              <CardArt cardId={card.templateId} name={template?.name} style={{ width: 280, margin: '0 auto 1rem' }} />
+              {reactive ? (
+                <div style={{ textAlign: 'center', color: '#64748b', maxWidth: 280 }}>
+                  Reactive card — plays automatically during the relevant phase.
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={!canPlay}
+                    onClick={() => playHandCard(card)}
+                    style={{ display: 'block', width: '100%', padding: '0.85rem 1rem', fontSize: '1rem', fontWeight: 700, color: 'white', backgroundColor: canPlay ? '#2563eb' : '#cbd5e1', border: 'none', borderRadius: '10px', cursor: canPlay ? 'pointer' : 'not-allowed' }}
+                  >
+                    {label}
+                  </button>
+                  {isMyTurn && ap < 1 && (
+                    <div style={{ textAlign: 'center', color: '#c00', marginTop: '0.5rem', fontSize: '0.85rem' }}>Not enough AP.</div>
+                  )}
+                  {!isMyTurn && (
+                    <div style={{ textAlign: 'center', color: '#888', marginTop: '0.5rem', fontSize: '0.85rem' }}>Only on your turn.</div>
+                  )}
+                </>
+              )}
             </div>
-            <HandCard
-              gameState={gameState}
-              myId={myId}
-              selectedHeroId={selectedHeroId}
-              setSelectedHeroId={setSelectedHeroId}
-              setViewedItemId={setViewedItemId}
-              setSelectedHeroLocation={setSelectedHeroLocation}
-              setHeroRollResult={setHeroRollResult}
-              handlePlayHero={handlePlayHero}
-              handlePlayMagic={handlePlayMagic}
-              handleInitiateCursedItemPlay={handleInitiateCursedItemPlay}
-              setPendingItemPlayId={setPendingItemPlayId}
-              setItemPlayPromptOpen={setItemPlayPromptOpen}
-              pendingHeroPlayId={pendingHeroPlayId}
-              selectedHero={selectedHero}
-              selectedHeroLocation={selectedHeroLocation}
-              playHeroPromptOpen={playHeroPromptOpen}
-              selectedHeroAP={selectedHeroAP}
-              isMyTurn={isMyTurn}
-            />
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {heroAbilityModalOpen && selectedHero && gameState && (
         <HeroAbilityModal
@@ -569,6 +632,8 @@ export default function Game() {
           mode={heroAbilityMode}
           isMyTurn={isMyTurn}
           isHeroRolling={isHeroRolling}
+          rolledDie1={rolledDice?.die1}
+          rolledDie2={rolledDice?.die2}
           modifierPhaseActive={!!gameState.modifierPhase && gameState.modifierPhase.rollingPlayerId === myId}
           playHeroRollResult={playHeroRollResult}
           handlePlayHeroRoll={handlePlayHeroRoll}
@@ -584,7 +649,7 @@ export default function Game() {
       <div onClick={(e) => e.stopPropagation()}>
         <aside className="sidebarModals">
             {abilityPrompt && (
-              <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+              <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100 }}>
                 <div style={{ backgroundColor: 'white', padding: '1.5rem', borderRadius: '12px', width: 'min(90vw, 480px)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
                   <h3 style={{ marginTop: 0 }}>
                     Ability Prompt
@@ -881,6 +946,14 @@ export default function Game() {
           <div className="gameHeaderLeft">
             <h1>Room {roomCode}</h1>
             <p>Status: <strong>{status}</strong></p>
+            <button
+              type="button"
+              onClick={handleCopyInvite}
+              className="buttonPrimary"
+              style={{ padding: '6px 12px', fontSize: '0.8rem', alignSelf: 'flex-start', ...(inviteCopied ? { background: '#16a34a' } : {}) }}
+            >
+              {inviteCopied ? '✓ Link copied!' : '🔗 Copy invite link'}
+            </button>
           </div>
           <form className="gameHeaderUsername" onSubmit={handleSubmit}>
             <input
@@ -893,6 +966,23 @@ export default function Game() {
             />
             <button type="submit" className="primaryButton">Save</button>
           </form>
+          {isInGame && gameState && (
+            <div className="gameHeaderStatus">
+              <GameStatusCard gameState={gameState} myId={myId} />
+            </div>
+          )}
+          {isInGame && gameState && (
+            <div className="gameHeaderOpponents">
+              <OpponentInformationCard
+                gameState={gameState}
+                myId={myId}
+                selectedOpponentPartyId={selectedOpponentPartyId}
+                viewedItemId={viewedItemId}
+                setSelectedOpponentPartyId={setSelectedOpponentPartyId}
+                setViewedItemId={setViewedItemId}
+              />
+            </div>
+          )}
           <button type="button" onClick={() => navigate('/')} className="primaryButton gameHeaderBack">
             Back to Home
           </button>
@@ -900,8 +990,7 @@ export default function Game() {
 
         {/* Row 2 — centered status / info panel */}
         <div className="gameStatusRow">
-          {isInGame && gameState && <GameStatusCard gameState={gameState} myId={myId} />}
-          {actionMessage && <div className="bannerError">{actionMessage}</div>}
+          {actionMessage && !leaderModalOpen && <div className="bannerError">{actionMessage}</div>}
           {challengeResult && (
             <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: challengeResult.challengerWon ? '#fff3cd' : '#d4edda', border: `1px solid ${challengeResult.challengerWon ? '#ffc107' : '#28a745'}`, color: '#333' }}>
               <strong>Challenge!</strong>{' '}
@@ -937,7 +1026,24 @@ export default function Game() {
                 myId={myId}
                 isMyTurn={isMyTurn}
                 onUsePartyLeaderAbility={handleUsePartyLeaderAbility}
+                actionMessage={actionMessage}
+                setActionMessage={setActionMessage}
+                modalOpen={leaderModalOpen}
+                setModalOpen={setLeaderModalOpen}
+                abilityPromptActive={!!abilityPrompt}
               />
+              <div className="boardLeftActions">
+                <EndTurnButton gameState={gameState} myId={myId} handleEndTurn={handleEndTurn} />
+                {import.meta.env.DEV && (
+                  <button
+                    type="button"
+                    onClick={handleQuit}
+                    style={{ boxSizing: 'border-box', padding: '0.6rem 0.75rem', fontSize: '0.9rem', backgroundColor: '#ff6b6b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                  >
+                    Quit Game
+                  </button>
+                )}
+              </div>
             </div>
             <div className="boardCenter">
               <PartyCard
@@ -953,14 +1059,16 @@ export default function Game() {
               />
             </div>
             <div className="boardRight">
-              <ActiveMonstersSidebarCard
-                gameState={gameState}
-                myId={myId}
-                isMyTurn={isMyTurn}
-                selectedMonsterId={selectedMonsterId}
-                setSelectedMonsterId={setSelectedMonsterId}
-                onAttackMonster={handleAttackMonster}
-              />
+              <div className="boardRightMonsters">
+                <ActiveMonstersSidebarCard
+                  gameState={gameState}
+                  myId={myId}
+                  isMyTurn={isMyTurn}
+                  selectedMonsterId={selectedMonsterId}
+                  setSelectedMonsterId={setSelectedMonsterId}
+                  onAttackMonster={handleAttackMonster}
+                />
+              </div>
             </div>
           </div>
         ) : (
@@ -982,17 +1090,43 @@ export default function Game() {
                 );
               })()}
 
-              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId === myId && (
-                <button type="button" onClick={handleStart} className="primaryButton" style={{ alignSelf: 'flex-start' }}>
-                  Start Game
-                </button>
-              )}
-
-              {gameState?.status === 'waiting' && gameState?.lobbyLeaderId !== myId && (
-                <p style={{ color: '#666' }}>
-                  Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to start the game...
-                </p>
-              )}
+              {gameState?.status === 'waiting' && (() => {
+                const leaderId = gameState.lobbyLeaderId;
+                const leaderName = (leaderId ? gameState.players[leaderId]?.username : undefined) ?? 'the lobby leader';
+                const amReady = !!players.find(p => p.id === myId)?.ready;
+                // The leader starts the game, so only everyone else readies up.
+                const everyoneReady = players.every(p => p.id === leaderId || p.ready);
+                const canStart = players.length >= 2 && everyoneReady;
+                const startHint = players.length < 2
+                  ? 'Need at least 2 players to start.'
+                  : everyoneReady ? null : 'Waiting for everyone to ready up…';
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    {leaderId === myId ? (
+                      <>
+                        <button type="button" onClick={handleStart} disabled={!canStart} className="buttonPrimary">
+                          Start Game
+                        </button>
+                        {startHint && <span style={{ color: '#64748b', fontSize: '0.9rem' }}>{startHint}</span>}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleToggleReady}
+                          className="buttonPrimary"
+                          style={amReady ? { background: '#16a34a', boxShadow: '0 14px 30px rgba(22, 163, 74, 0.18)' } : undefined}
+                        >
+                          {amReady ? '✓ Ready' : 'Ready up'}
+                        </button>
+                        <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
+                          {amReady ? `Waiting for ${leaderName} to start the game…` : `Let ${leaderName} know you are ready to play.`}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {gameState?.status === 'rolling' && (
                 <FirstRollCard gameState={gameState} myId={myId} handleRoll={handleRoll} isRolling={isRolling} myRoll={myRoll} />
@@ -1011,15 +1145,43 @@ export default function Game() {
               )}
 
               <div style={{ padding: '1rem', border: '1px solid #ccc', borderRadius: '8px', backgroundColor: 'white' }}>
-                <h3>Players Connected</h3>
-                {players.length === 0 ? (
-                  <p>No players connected yet.</p>
-                ) : (
-                  players.map((player) => (
-                    <p key={player.id}>{player.username || player.id}</p>
-                  ))
-                )}
+                <h3>Players ({players.length}/{MAX_PLAYERS})</h3>
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  {players.map((player, index) => {
+                    const isLeader = player.id === gameState?.lobbyLeaderId;
+                    const isMe = player.id === myId;
+                    const displayName = player.username || player.id;
+                    return (
+                      <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white' }}>
+                        <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
+                          {displayName.charAt(0).toUpperCase()}
+                        </div>
+                        <span style={{ fontWeight: isMe ? 700 : 400, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {displayName}{isMe ? ' (you)' : ''}
+                        </span>
+                        {isLeader && <span title="Lobby leader">👑</span>}
+                        {gameState?.status === 'waiting' && !isLeader && (
+                          <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? '#166534' : '#64748b', backgroundColor: player.ready ? '#dcfce7' : '#f1f5f9' }}>
+                            {player.ready ? '✓ Ready' : 'Not ready'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {gameState?.status === 'waiting' && Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, i) => (
+                    <div key={`empty-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px dashed #cbd5e1', color: '#94a3b8' }}>
+                      <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', border: '1px dashed #cbd5e1', boxSizing: 'border-box' }} />
+                      <span style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for a player…</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {gameState && (
+                <div className="lobbyChat">
+                  <ChatLogPanel gameState={gameState} entries={gameState.gameLog ?? []} myId={myId} onSend={handleSendChat} />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1032,9 +1194,6 @@ export default function Game() {
                 gameState={gameState}
                 myId={myId}
                 showDrawPrompt={showDrawPrompt}
-                actionMessage={actionMessage}
-                justDrew={justDrew}
-                setActionMessage={setActionMessage}
                 setShowDrawPrompt={setShowDrawPrompt}
                 handleDrawFromMain={handleDrawFromMain}
                 handleMulligan={handleMulligan}
@@ -1046,33 +1205,10 @@ export default function Game() {
               />
             </div>
             <div className="footerHand">
-              <button
-                type="button"
-                className="handButton"
-                onClick={(event) => { event.stopPropagation(); setShowHand(true); }}
-              >
-                🃏 Your Hand ({gameState.players[myId].zones.hand.length})
-              </button>
-              <EndTurnButton gameState={gameState} myId={myId} handleEndTurn={handleEndTurn} />
-              {import.meta.env.DEV && (
-                <button
-                  type="button"
-                  onClick={handleQuit}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '0.75rem 1rem', fontSize: '0.9rem', backgroundColor: '#ff6b6b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                >
-                  Quit Game
-                </button>
-              )}
+              <HandFan gameState={gameState} myId={myId} onCardClick={setHandDetailId} />
             </div>
-            <div className="footerOpponents">
-              <OpponentInformationCard
-                gameState={gameState}
-                myId={myId}
-                selectedOpponentPartyId={selectedOpponentPartyId}
-                viewedItemId={viewedItemId}
-                setSelectedOpponentPartyId={setSelectedOpponentPartyId}
-                setViewedItemId={setViewedItemId}
-              />
+            <div className="footerChat">
+              <ChatLogPanel gameState={gameState} entries={gameState.gameLog ?? []} myId={myId} onSend={handleSendChat} />
             </div>
           </footer>
         )}

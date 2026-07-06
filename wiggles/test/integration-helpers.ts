@@ -36,7 +36,7 @@ const waitFor = async <T>(getter: () => T, pred: (v: T) => boolean, ms = 3000): 
 const RECORDED = [
   'stateUpdate', 'playersUpdated', 'actionFailed', 'cardDrawn', 'heroRollResult',
   'monsterAttackResult', 'challengeResolved', 'abilityPrompt', 'abilityResolution',
-  'heroPlayAccepted', 'heroPlayedFromAbility', 'roomFull', 'pongClient',
+  'heroPlayAccepted', 'heroPlayedFromAbility', 'roomFull', 'roomNotFound', 'pongClient',
 ];
 
 export interface TestClient {
