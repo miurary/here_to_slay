@@ -301,10 +301,14 @@ export interface LogEntry {
 export type Player = PlayerState;
 
 export interface PlayerState {
+  /** Stable player identity (client-generated UUID), not the socket id. */
   id: string;
   username: string | undefined;
   /** Lobby ready-up flag; only meaningful while the game status is 'waiting'. */
   ready?: boolean;
+  /** false while the seat is held for a disconnected player (grace period);
+      undefined/true means connected. */
+  connected?: boolean;
   actionPoints: number;
   partyLeaderId: string | undefined;
   slainMonsters: CardInstance[];

@@ -20,6 +20,7 @@ import MainDeckCard from './components/game/MainDeckCard';
 import DiscardPileCard from './components/game/DiscardPileCard';
 import ActiveMonstersSidebarCard from './components/game/ActiveMonstersSidebarCard';
 import ChatLogPanel from './components/game/ChatLogPanel';
+import { getPlayerId } from './utils/playerId';
 import OpponentInformationCard from './components/game/OpponentInformationCard';
 
 const MAX_PLAYERS = 6;
@@ -99,11 +100,16 @@ export default function Game() {
   useEffect(() => {
     if (!roomCode) return;
 
+    // Stable identity across reconnects — the server keys our seat by this,
+    // not by the socket id.
+    const playerId = getPlayerId();
+
     const client = io(`${import.meta.env.VITE_API_URL}`, {
       withCredentials: true,
       auth: {
         roomCode,
         username: name || undefined,
+        playerId,
       },
     });
 
@@ -113,7 +119,7 @@ export default function Game() {
     setActiveSocket(client);
 
     client.on('connect', () => {
-      setMyId(client.id ?? '');
+      setMyId(playerId);
       setStatus(`Connected to room ${roomCode}`);
       client.emit('pingServer');
     });
@@ -130,8 +136,7 @@ export default function Game() {
       setGameState(state);
       setStatus(`Game status: ${state.status}`);
 
-      const clientId = client.id ?? '';
-      setMyRoll(clientId ? state.diceRolls[clientId] ?? null : null);
+      setMyRoll(state.diceRolls[playerId] ?? null);
 
       // Via the ref: the closure's rollAnimationTimer is stale (this handler is
       // registered once per room), so reading the state var would always see null.
@@ -142,7 +147,7 @@ export default function Game() {
       // If a hero was just played via ability and is now in the party, show roll prompt
       const pendingId = pendingHeroPlayIdRef.current;
       if (pendingId) {
-        const myPlayer = state.players[clientId];
+        const myPlayer = state.players[playerId];
         if (myPlayer) {
           const heroInParty = myPlayer.zones.party.find((card) => card.instanceId === pendingId);
           if (heroInParty && !playHeroPromptOpenRef.current) {
@@ -234,7 +239,7 @@ export default function Game() {
     });
 
     client.on('disconnect', () => {
-      setStatus('Disconnected from server.');
+      setStatus('Connection lost — reconnecting…');
     });
 
     return () => {
@@ -1113,9 +1118,10 @@ export default function Game() {
                     {players.map((player, index) => {
                       const isLeader = player.id === gameState?.lobbyLeaderId;
                       const isMe = player.id === myId;
+                      const isAway = player.connected === false;
                       const displayName = player.username || player.id;
                       return (
-                        <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white' }}>
+                        <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: isMe ? '#eff6ff' : 'white', opacity: isAway ? 0.55 : 1 }}>
                           <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
                             {displayName.charAt(0).toUpperCase()}
                           </div>
@@ -1123,7 +1129,11 @@ export default function Game() {
                             {displayName}{isMe ? ' (you)' : ''}
                           </span>
                           {isLeader && <span title="Lobby leader">👑</span>}
-                          {gameState?.status === 'waiting' && !isLeader && (
+                          {isAway ? (
+                            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: '#92400e', backgroundColor: '#fef3c7' }}>
+                              Reconnecting…
+                            </span>
+                          ) : gameState?.status === 'waiting' && !isLeader && (
                             <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? '#166534' : '#64748b', backgroundColor: player.ready ? '#dcfce7' : '#f1f5f9' }}>
                               {player.ready ? '✓ Ready' : 'Not ready'}
                             </span>

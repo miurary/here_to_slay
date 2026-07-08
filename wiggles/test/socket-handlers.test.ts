@@ -450,12 +450,145 @@ describe('endTurn / mulligan / choosePartyLeader / disconnect', () => {
     expect(gs.gameLog.some(e => e.kind === 'system' && /party leader/i.test(e.text))).toBe(true);
   });
 
-  it('disconnect removes the player from the room', () => {
-    const gs = buildGameState({ players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+  it('disconnect removes the player immediately in the lobby', () => {
+    const gs = buildGameState({ status: 'waiting', players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
     const h = createHarness(gs);
     connect(h, 'p1'); connect(h, 'p2');
     h.socket('p2').fire('disconnect');
     expect(gs.players['p2']).toBeUndefined();
     expect(gs.players['p1']).toBeDefined();
+  });
+});
+
+describe('reconnection and seat grace', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const inProgress = () => {
+    const gs = buildGameState({
+      players: [
+        buildPlayer({ id: 'p1', hand: [makeCard('s_001')] }),
+        buildPlayer({ id: 'p2' }),
+        buildPlayer({ id: 'p3' }),
+      ],
+      activePlayerId: 'p1',
+    });
+    gs.lobbyLeaderId = 'p1';
+    return gs;
+  };
+
+  it('holds a mid-game seat, passes the turn, and reattaches on reconnect', () => {
+    const gs = inProgress();
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+
+    h.socket('p1').fire('disconnect');
+    expect(gs.players['p1']!.connected).toBe(false);
+    expect(gs.players['p1']!.zones.hand).toHaveLength(1);
+    expect(gs.activePlayerId).toBe('p2'); // forced pass on disconnect
+    expect(gs.players['p2']!.actionPoints).toBe(3);
+    expect(gs.lobbyLeaderId).toBe('p2'); // leadership moves to a live player
+
+    const s = h.addSocket('p1-reborn');
+    s.handshake.auth.playerId = 'p1';
+    handleConnection(s as never);
+    expect(gs.players['p1']!.connected).toBe(true);
+    expect(gs.players['p1']!.zones.hand).toHaveLength(1);
+    expect(Object.keys(gs.players)).toHaveLength(3);
+  });
+
+  it('releases the seat once the grace period expires', () => {
+    const gs = inProgress();
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+    h.socket('p2').fire('disconnect');
+    expect(gs.players['p2']).toBeDefined();
+
+    vi.advanceTimersByTime(120_000);
+    expect(gs.players['p2']).toBeUndefined();
+    expect(Object.keys(gs.players)).toHaveLength(2);
+  });
+
+  it('reconnecting cancels the pending seat removal', () => {
+    const gs = inProgress();
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+    h.socket('p2').fire('disconnect');
+    vi.advanceTimersByTime(60_000);
+
+    const s = h.addSocket('p2-reborn');
+    s.handshake.auth.playerId = 'p2';
+    handleConnection(s as never);
+
+    vi.advanceTimersByTime(300_000);
+    expect(gs.players['p2']!.connected).toBe(true);
+  });
+
+  it('a second connection with the same playerId takes over the seat', () => {
+    const gs = inProgress();
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+
+    const s2 = h.addSocket('p1-tab2');
+    s2.handshake.auth.playerId = 'p1';
+    handleConnection(s2 as never);
+    expect(h.socket('p1').disconnected).toBe(true); // old socket kicked
+
+    // The old socket's disconnect event arrives afterwards — the seat, now
+    // bound to the new socket, must be left alone.
+    h.socket('p1').fire('disconnect');
+    expect(gs.players['p1']).toBeDefined();
+    expect(gs.players['p1']!.connected).toBe(true);
+    expect(gs.activePlayerId).toBe('p1');
+  });
+
+  it('endTurn skips seats held for disconnected players', () => {
+    const gs = inProgress();
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+    h.socket('p2').fire('disconnect');
+
+    h.socket('p1').fire('endTurn');
+    expect(gs.activePlayerId).toBe('p3');
+  });
+
+  it('the first-player roll advances past a disconnected roller', () => {
+    const gs = buildGameState({
+      status: 'rolling',
+      players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' }), buildPlayer({ id: 'p3' })],
+    });
+    gs.currentRollerId = 'p1';
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+
+    h.socket('p1').fire('rollForFirst');
+    expect(gs.currentRollerId).toBe('p2');
+
+    h.socket('p2').fire('disconnect');
+    expect(gs.currentRollerId).toBe('p3');
+
+    h.socket('p3').fire('rollForFirst');
+    expect(gs.status).toBe('roll_complete');
+    expect(['p1', 'p3']).toContain(gs.rollWinnerId);
+  });
+
+  it('leader selection auto-picks for a disconnected seat', () => {
+    const cards = [makeCard('p_001'), makeCard('p_002'), makeCard('p_003')];
+    const gs = buildGameState({
+      status: 'party_leader_selection',
+      players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' }), buildPlayer({ id: 'p3' })],
+    });
+    gs.currentSelectionPlayerId = 'p1';
+    gs.partyLeaderSelectionOrder = ['p1', 'p2', 'p3'];
+    gs.availablePartyLeaderCards = [...cards];
+    const h = createHarness(gs);
+    connect(h, 'p1'); connect(h, 'p2'); connect(h, 'p3');
+
+    h.socket('p2').fire('disconnect');
+    h.socket('p1').fire('choosePartyLeader', cards[0]!.instanceId);
+
+    // p2's pick was made for them; selection moved on to p3.
+    expect(gs.players['p2']!.partyLeaderId).toBeTruthy();
+    expect(gs.currentSelectionPlayerId).toBe('p3');
   });
 });

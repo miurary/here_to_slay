@@ -51,10 +51,11 @@ export interface TestClient {
   close(): void;
 }
 
-export const connect = (port: number, roomCode: string, username: string): Promise<TestClient> =>
+export const connect = (port: number, roomCode: string, username: string, playerId?: string): Promise<TestClient> =>
   new Promise((resolve, reject) => {
     const socket = ioc(`http://localhost:${port}`, {
-      auth: { roomCode, username }, transports: ['websocket'], forceNew: true,
+      auth: { roomCode, username, ...(playerId ? { playerId } : {}) },
+      transports: ['websocket'], forceNew: true,
     });
     const events: Record<string, unknown[][]> = Object.fromEntries(RECORDED.map(e => [e, []]));
     let lastState: GameState | undefined;

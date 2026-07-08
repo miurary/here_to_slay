@@ -4,7 +4,7 @@ import type {
   CardInstance, CardTemplate, GameState, Player,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
-import { emitAbilityPrompt, buildPromptId } from './state.js';
+import { emitAbilityPrompt, buildPromptId, pidOf } from './state.js';
 import type { AbilityPromptRequest, AbilityPromptOption } from './state.js';
 import { drawCardsForPlayer, triggerSlainMonsterPassive, tryDecoyDollRedirect } from './effects.js';
 import { executeRollAndEmit } from './rolls.js';
@@ -26,11 +26,11 @@ const emitItemTriggerPrompt = (
 
   switch (effectAction) {
     case 'REROLL_HERO_ABILITY': {
-      emitAbilityPrompt(socket.id, {
+      emitAbilityPrompt(pidOf(socket), {
         promptId: buildPromptId(),
         roomCode: socket.data.roomCode as string,
         heroInstanceId: hero.instanceId,
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pidOf(socket),
         promptType: 'confirm',
         message: `${itemTemplate.name}: Sacrifice this item to reroll the hero ability?`,
         options: [
@@ -54,11 +54,11 @@ const emitItemTriggerPrompt = (
           payload: { cardInstanceId: c.instanceId },
         }));
       if (heroOptions.length === 0) return false;
-      emitAbilityPrompt(socket.id, {
+      emitAbilityPrompt(pidOf(socket), {
         promptId: buildPromptId(),
         roomCode: socket.data.roomCode as string,
         heroInstanceId: hero.instanceId,
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pidOf(socket),
         promptType: 'selectCard',
         message: `${itemTemplate.name}: You must SACRIFICE a Hero card.`,
         options: heroOptions,
@@ -77,11 +77,11 @@ const emitItemTriggerPrompt = (
         payload: { cardInstanceId: c.instanceId },
       }));
       if (cardOptions.length === 0) return false;
-      emitAbilityPrompt(socket.id, {
+      emitAbilityPrompt(pidOf(socket), {
         promptId: buildPromptId(),
         roomCode: socket.data.roomCode as string,
         heroInstanceId: hero.instanceId,
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pidOf(socket),
         promptType: 'discardCard',
         message: `${itemTemplate.name}: You must DISCARD a card.`,
         options: cardOptions,

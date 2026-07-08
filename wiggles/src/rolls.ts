@@ -5,7 +5,7 @@ import type {
   CardInstance, CardTemplate, Effect, GameState, Player, PlayerState,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
-import { getSocketByPlayerId, modifierPhases } from './state.js';
+import { getSocketByPlayerId, modifierPhases, pidOf } from './state.js';
 import type { ModifierPhaseState } from './state.js';
 import { getPlayerRollBonus } from './util.js';
 import { logGame } from './analytics.js';
@@ -164,7 +164,7 @@ const finalizeRoll = (
   if (phase.rollType === 'monster_attack') {
     const monster = gameState.activeMonsters.find(m => m.instanceId === phase.monsterInstanceId);
     const player = gameState.players[phase.rollingPlayerId];
-    const rollingSocket = getSocketByPlayerId(phase.rollingPlayerId);
+    const rollingSocket = getSocketByPlayerId(roomCode, phase.rollingPlayerId);
     if (monster && player && rollingSocket) {
       const monsterTemplate = gameState.cardTemplates[monster.templateId];
       if (monsterTemplate) applyMonsterAttackEffects(roomCode, rollingSocket, gameState, player, monster, monsterTemplate, finalTotal, sendRoomUpdate);
@@ -184,7 +184,7 @@ const finalizeRoll = (
   parts.push(`= ${finalTotal}`);
   const message = `${parts.join(' ')}. ${success ? 'Success!' : 'Failed.'} (needed ${phase.requiredRoll}).`;
 
-  const rollingSocket = getSocketByPlayerId(phase.rollingPlayerId);
+  const rollingSocket = getSocketByPlayerId(roomCode, phase.rollingPlayerId);
   if (rollingSocket) {
     rollingSocket.emit('heroRollResult', {
       heroInstanceId: phase.heroInstanceId,
@@ -273,7 +273,7 @@ const executeRollAndEmit = (
   const requiredRoll = (template?.rollToPlay as number | undefined) ?? 0;
   const [die1, die2] = roll2d6();
   const persistentBonus = getPlayerRollBonus(player) + preRollBonus
-    + getPartyLeaderHeroAbilityBonus(gameState, socket.id)
+    + getPartyLeaderHeroAbilityBonus(gameState, pidOf(socket))
     + getSlainMonsterRollBonus(gameState, player, 'HERO_ABILITY_ROLLS');
   const rawDiceTotal = die1 + die2;
   const currentTotal = rawDiceTotal + persistentBonus;
@@ -281,7 +281,7 @@ const executeRollAndEmit = (
 
   hero.effectUsedThisTurn = true;
 
-  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
+  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, pidOf(socket));
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
   const rollerNeedsPrompt = currentTotal < requiredRoll && rollerHasModifiers;
 
@@ -292,7 +292,7 @@ const executeRollAndEmit = (
     requiredRoll,
     success: currentTotal >= requiredRoll,
     contested: rollerNeedsPrompt || opponentsWithModifiers.length > 0,
-  }, socket.id);
+  }, pidOf(socket));
 
   if (!rollerNeedsPrompt && opponentsWithModifiers.length === 0) {
     const success = currentTotal >= requiredRoll;
@@ -300,7 +300,7 @@ const executeRollAndEmit = (
     socket.emit('heroRollResult', { heroInstanceId: hero.instanceId, die1, die2, total: currentTotal, requiredRoll, success, message });
 
     // m_007 Arctic Aries — successful hero roll: owner may DRAW a card.
-    if (success) triggerSlainMonsterPassive(gameState, socket.id, 'ON_HERO_ABILITY_SUCCESS');
+    if (success) triggerSlainMonsterPassive(gameState, pidOf(socket), 'ON_HERO_ABILITY_SUCCESS');
 
     const equippedItemId = hero.equippedItem;
     if (equippedItemId) {
@@ -330,7 +330,7 @@ const executeRollAndEmit = (
     accumulatedModifier: 0, requiredRoll,
     rollContext: 'HERO_ABILITY',
     rollType: 'hero_ability',
-    heroInstanceId: hero.instanceId, rollingPlayerId: socket.id,
+    heroInstanceId: hero.instanceId, rollingPlayerId: pidOf(socket),
     phase: initialPhase,
     allOpponentsWithModifiers: opponentsWithModifiers,
     opponentQueue: [...opponentsWithModifiers],

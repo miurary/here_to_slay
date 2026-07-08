@@ -102,10 +102,42 @@ const getIo = () => io;
 const rooms: Record<string, GameState> = {};
 const getRoomState = (roomCode?: string) => roomCode ? rooms[roomCode] : undefined;
 
-const getSocketByPlayerId = (playerId: string) => io.sockets.sockets.get(playerId);
+// ── player identity ⇄ live socket registry ──────────────────────────────────
+// Players are keyed by a persistent, client-generated playerId so a reconnect
+// (new socket) can reclaim the same seat. This registry maps a seat to its
+// current live socket; keys are room-scoped because the same browser (same
+// playerId) can sit in two rooms at once.
+const playerSocketIds = new Map<string, string>();
+const playerSocketKey = (roomCode: string, playerId: string) => `${roomCode}:${playerId}`;
+
+const registerPlayerSocket = (roomCode: string, playerId: string, socketId: string) => {
+  playerSocketIds.set(playerSocketKey(roomCode, playerId), socketId);
+};
+
+/** Unbind only if this socket still owns the seat (a takeover may have rebound it). */
+const unregisterPlayerSocket = (roomCode: string, playerId: string, socketId: string) => {
+  const key = playerSocketKey(roomCode, playerId);
+  if (playerSocketIds.get(key) === socketId) playerSocketIds.delete(key);
+};
+
+const socketIdForPlayer = (roomCode: string, playerId: string) =>
+  playerSocketIds.get(playerSocketKey(roomCode, playerId));
+
+/** The stable player id bound to a socket at connection time (falls back to
+    the socket id for clients/tests that don't send one). */
+const pidOf = (socket: { id: string; data: { playerId?: unknown } }): string =>
+  typeof socket.data.playerId === 'string' && socket.data.playerId ? socket.data.playerId : socket.id;
+
+const getSocketByPlayerId = (roomCode: string, playerId: string) =>
+  io.sockets.sockets.get(socketIdForPlayer(roomCode, playerId) ?? playerId);
+
+// Pending seat-removal timers for disconnected players (grace period), keyed
+// like the socket registry. Owned here so tests can reset them with the rest
+// of the engine state.
+const seatRemovalTimers = new Map<string, { timer: NodeJS.Timeout; disconnectedAt: number }>();
 
 const emitAbilityPrompt = (playerId: string, prompt: AbilityPromptRequest) => {
-  const targetSocket = getSocketByPlayerId(playerId);
+  const targetSocket = getSocketByPlayerId(prompt.roomCode, playerId);
   if (!targetSocket) return;
   abilityPromptRequests.set(prompt.promptId, prompt);
   targetSocket.emit('abilityPrompt', {
@@ -141,5 +173,7 @@ export {
   pendingChallenges, modifierPhases,
   collectedDiscards, getSocketByPlayerId, emitAbilityPrompt, emitAbilityResolution, buildPromptId,
   rooms, getRoomState, setIo, getIo,
+  playerSocketIds, registerPlayerSocket, unregisterPlayerSocket, socketIdForPlayer, pidOf,
+  seatRemovalTimers, playerSocketKey,
 };
 

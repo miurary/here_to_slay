@@ -48,8 +48,9 @@ export default function OpponentInformationCard({ gameState, myId, selectedOppon
                     >
                         {/* Row 1: name + View button */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
-                            <div style={{ fontWeight: 'bold', fontSize: '0.8rem', color: getPlayerColor(gameState, player.id), minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 'bold', fontSize: '0.8rem', color: getPlayerColor(gameState, player.id), minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: player.connected === false ? 0.55 : 1 }}>
                                 {player.username || 'Player'}
+                                {player.connected === false && <span style={{ fontWeight: 400, color: '#b45309' }}> (reconnecting…)</span>}
                             </div>
                             <button
                                 type="button"

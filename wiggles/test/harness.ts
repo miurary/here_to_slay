@@ -15,6 +15,8 @@ import {
   modifierPhases,
   collectedDiscards,
   rooms,
+  playerSocketIds,
+  seatRemovalTimers,
 } from '../src/state.js';
 import { loadAllCardTemplates } from '../src/cards.js';
 import type {
@@ -164,7 +166,7 @@ const makeSocket = (id: string, roomCode: string): FakeSocket => {
   const handlers = new Map<string, (...args: unknown[]) => void>();
   return {
     id,
-    data: { roomCode },
+    data: { roomCode, playerId: id },
     handshake: { auth: { roomCode, username: id } },
     emitted,
     disconnected: false,
@@ -258,5 +260,8 @@ export const resetEngineState = (): void => {
   pendingChallenges.clear();
   modifierPhases.clear();
   collectedDiscards.clear();
+  playerSocketIds.clear();
+  for (const { timer } of seatRemovalTimers.values()) clearTimeout(timer);
+  seatRemovalTimers.clear();
   for (const key of Object.keys(rooms)) delete rooms[key];
 };

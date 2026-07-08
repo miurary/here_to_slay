@@ -85,7 +85,7 @@ const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState
     player.zones.party.push(pending.pendingCardInstance);
     applyWinIfMet(gameState, player, pending.pendingPlayerId);
     markHeroPlayedFromAbility(roomCode, pending.pendingCardInstance.instanceId);
-    const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
+    const playerSocket = getSocketByPlayerId(roomCode, pending.pendingPlayerId);
     if (playerSocket) playerSocket.emit('heroPlayAccepted', pending.pendingCardInstance.instanceId);
   } else if (pending.pendingCardType === 'item') {
     const targetPlayer = gameState.players[pending.itemTargetPlayerId ?? pending.pendingPlayerId];
@@ -96,7 +96,7 @@ const executePendingCardPlay = (roomCode: string, pending: PendingChallengeState
     }
   } else if (pending.pendingCardType === 'magic') {
     gameState.discardPile.push(pending.pendingCardInstance);
-    const playerSocket = getSocketByPlayerId(pending.pendingPlayerId);
+    const playerSocket = getSocketByPlayerId(roomCode, pending.pendingPlayerId);
     if (playerSocket && pending.magicSteps) {
       processMagicCardSteps(
         playerSocket,

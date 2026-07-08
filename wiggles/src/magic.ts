@@ -4,7 +4,7 @@ import type {
   Effect, GameState, Player,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
-import { emitAbilityPrompt, buildPromptId } from './state.js';
+import { emitAbilityPrompt, buildPromptId, pidOf } from './state.js';
 import type { AbilityPromptOption, AbilityPromptRequest } from './state.js';
 import { moveCardBetweenZones, playerHasSlainEffectAction, playerHasSlainEffectFlag, playerHasTempFlag } from './util.js';
 import { drawCardsForPlayer, resolveHeroDestruction, triggerSlainMonsterPassive, tryDecoyDollRedirect } from './effects.js';
@@ -64,11 +64,11 @@ const processMagicCardSteps = (
           payload: { cardInstanceId: c.instanceId },
         }));
         if (discardOptions.length === 0) { stepResult = 'No cards to discard.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'discardCard',
           message: 'Discard a card.',
           options: discardOptions,
@@ -85,7 +85,7 @@ const processMagicCardSteps = (
           let ownerId = responsePayload.playerId as string | undefined;
           if (!ownerId) {
             for (const [opId, opp] of Object.entries(gameState.players)) {
-              if (opId === socket.id) continue;
+              if (opId === pidOf(socket)) continue;
               if (opp.zones.party.some(c => c.instanceId === heroId)) { ownerId = opId; break; }
             }
           }
@@ -99,11 +99,11 @@ const processMagicCardSteps = (
           ) {
             const target = gameState.players[ownerId]?.zones.party.find(c => c.instanceId === heroId);
             const heroName = target ? gameState.cardTemplates[target.templateId]?.name ?? 'that Hero' : 'that Hero';
-            emitAbilityPrompt(socket.id, {
+            emitAbilityPrompt(pidOf(socket), {
               promptId: buildPromptId(),
               roomCode: socket.data.roomCode as string,
               heroInstanceId: magicCardId,
-              sourcePlayerId: socket.id,
+              sourcePlayerId: pidOf(socket),
               promptType: 'confirm',
               message: `Corrupted Sabretooth: STEAL ${heroName} instead of destroying it?`,
               options: [
@@ -122,7 +122,7 @@ const processMagicCardSteps = (
         }
         const destroyOptions: AbilityPromptOption[] = [];
         for (const [opId, opp] of Object.entries(gameState.players)) {
-          if (opId === socket.id) continue;
+          if (opId === pidOf(socket)) continue;
           // m_014 Terratuga / h_032 Mighty Blade — protected heroes are not targets.
           if (playerHasSlainEffectFlag(gameState, opp, 'blockHeroDestruction')) continue;
           if (playerHasTempFlag(opp, 'blockHeroDestruction')) continue;
@@ -137,11 +137,11 @@ const processMagicCardSteps = (
           }
         }
         if (destroyOptions.length === 0) { stepResult = 'No opponent heroes to destroy.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose a Hero to DESTROY.',
           options: destroyOptions,
@@ -194,7 +194,7 @@ const processMagicCardSteps = (
         }
         const stealOptions: AbilityPromptOption[] = [];
         for (const [opId, opp] of Object.entries(gameState.players)) {
-          if (opId === socket.id) continue;
+          if (opId === pidOf(socket)) continue;
           if (playerHasTempFlag(opp, 'blockSteal')) continue; // h_034 Calming Voice
           for (const card of opp.zones.party) {
             if (card.cardType === 'hero') {
@@ -207,11 +207,11 @@ const processMagicCardSteps = (
           }
         }
         if (stealOptions.length === 0) { stepResult = 'No opponent heroes to steal.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose a Hero to STEAL from an opponent.',
           options: stealOptions,
@@ -245,11 +245,11 @@ const processMagicCardSteps = (
             payload: { cardInstanceId: c.instanceId, playerId: opponentId },
           }));
         if (swapOptions.length === 0) { stepResult = 'No heroes to give.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose a Hero from your Party to give to the opponent.',
           options: swapOptions,
@@ -291,11 +291,11 @@ const processMagicCardSteps = (
             payload: { cardInstanceId: c.instanceId },
           }));
         if (heroOptions.length === 0) { stepResult = 'No Hero cards in the discard pile.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose a Hero card from the discard pile to add to your hand.',
           options: heroOptions,
@@ -338,11 +338,11 @@ const processMagicCardSteps = (
           }
         }
         if (itemOptions.length === 0) { stepResult = 'No equipped items in play.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose an equipped Item to return to its owner’s hand.',
           options: itemOptions,
@@ -379,11 +379,11 @@ const processMagicCardSteps = (
           label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
           payload: { cardInstanceId: c.instanceId },
         }));
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'multiSelectCard',
           message: `Discard up to ${maxN} card${maxN === 1 ? '' : 's'} — each forces a player to SACRIFICE a Hero.`,
           options,
@@ -439,11 +439,11 @@ const processMagicCardSteps = (
           }
         }
         if (sacOptions.length === 0) { stepResult = 'No Heroes available to sacrifice.'; break; }
-        emitAbilityPrompt(socket.id, {
+        emitAbilityPrompt(pidOf(socket), {
           promptId: buildPromptId(),
           roomCode: socket.data.roomCode as string,
           heroInstanceId: magicCardId,
-          sourcePlayerId: socket.id,
+          sourcePlayerId: pidOf(socket),
           promptType: 'selectCard',
           message: 'Choose a Hero card to SACRIFICE.',
           options: sacOptions,

@@ -35,7 +35,7 @@ const triggerSlainMonsterPassive = (
 ) => {
   const player = gameState.players[ownerPlayerId];
   if (!player) return;
-  const targetSocket = getSocketByPlayerId(ownerPlayerId);
+  const targetSocket = getSocketByPlayerId(gameState.gameId, ownerPlayerId);
   if (!targetSocket) return;
   const roomCode = targetSocket.data.roomCode as string;
 
@@ -150,7 +150,7 @@ const offerPlayDrawnCard = (
     return s?.action === 'PLAY_DRAWN_CARD' && s.cardType === cardType;
   });
   if (!has) return;
-  const socket = getSocketByPlayerId(player.id);
+  const socket = getSocketByPlayerId(gameState.gameId, player.id);
   if (!socket) return;
   const roomCode = socket.data.roomCode as string;
   const cardName = gameState.cardTemplates[card.templateId]?.name ?? card.templateId;
@@ -411,7 +411,7 @@ const processHeroAbilityEffects = (
             : { ...effect, casterId: sourceSocket.id };
           let discardPrompted = 0;
           for (const opponentId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
-            const opponentSocket = getSocketByPlayerId(opponentId);
+            const opponentSocket = getSocketByPlayerId(gameState.gameId, opponentId);
             if (!opponentSocket) continue;
             const opponent = gameState.players[opponentId];
             if (!opponent) continue;
@@ -472,7 +472,7 @@ const processHeroAbilityEffects = (
           if (responsePayload?.playerId) {
             const targetPlayer = gameState.players[responsePayload.playerId];
             if (!targetPlayer) return 'Selected player not found.';
-            const targetSocket = getSocketByPlayerId(responsePayload.playerId);
+            const targetSocket = getSocketByPlayerId(gameState.gameId, responsePayload.playerId);
             if (!targetSocket) return 'Selected player not connected.';
             const options = targetPlayer.zones.hand.map((card: CardInstance) => ({
               id: card.instanceId,
@@ -557,7 +557,7 @@ const processHeroAbilityEffects = (
             ? 'Sacrifice a Hero card from your party.'
             : 'Sacrifice a card from your party.';
           for (const targetId of sacrificeIds) {
-            const targetSocket2 = getSocketByPlayerId(targetId);
+            const targetSocket2 = getSocketByPlayerId(gameState.gameId, targetId);
             if (!targetSocket2) continue;
             const targetPlayer2 = gameState.players[targetId];
             if (!targetPlayer2) continue;
@@ -608,7 +608,7 @@ const processHeroAbilityEffects = (
           // h_040 Hopper: caster picks a player; that player chooses the sacrifice.
           if (responsePayload?.playerId) {
             const sacTarget = gameState.players[responsePayload.playerId];
-            const sacTargetSocket = getSocketByPlayerId(responsePayload.playerId);
+            const sacTargetSocket = getSocketByPlayerId(gameState.gameId, responsePayload.playerId);
             if (!sacTarget || !sacTargetSocket) return 'Selected player not found.';
             const options = sacTarget.zones.party
               .filter((card: CardInstance) => card.cardType !== 'party_leader')

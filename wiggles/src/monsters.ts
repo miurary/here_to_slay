@@ -5,7 +5,7 @@ import type {
   CardInstance, CardTemplate, Effect, GameState, Player, MonsterInstance,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
-import { emitAbilityPrompt, buildPromptId, getIo, modifierPhases } from './state.js';
+import { emitAbilityPrompt, buildPromptId, getIo, modifierPhases, pidOf } from './state.js';
 import type { ModifierPhaseState } from './state.js';
 import { getHeroEffectiveClass, applyWinIfMet } from './util.js';
 import { logEvent, nameOf } from './log.js';
@@ -67,11 +67,11 @@ const promptMonsterDiscard = (
     label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
     payload: { cardInstanceId: c.instanceId },
   }));
-  emitAbilityPrompt(socket.id, {
+  emitAbilityPrompt(pidOf(socket), {
     promptId: buildPromptId(),
     roomCode: socket.data.roomCode as string,
     heroInstanceId: monsterInstanceId,
-    sourcePlayerId: socket.id,
+    sourcePlayerId: pidOf(socket),
     promptType: 'discardCard',
     message: `Discard ${remaining} card${remaining > 1 ? 's' : ''} (monster penalty).`,
     options: opts,
@@ -101,11 +101,11 @@ const promptMonsterSacrifice = (
       payload: { cardInstanceId: c.instanceId },
     }));
   if (heroOptions.length === 0) { sendRoomUpdate(); return; }
-  emitAbilityPrompt(socket.id, {
+  emitAbilityPrompt(pidOf(socket), {
     promptId: buildPromptId(),
     roomCode: socket.data.roomCode as string,
     heroInstanceId: monsterInstanceId,
-    sourcePlayerId: socket.id,
+    sourcePlayerId: pidOf(socket),
     promptType: 'selectCard',
     message: `Sacrifice ${remaining} Hero card${remaining > 1 ? 's' : ''} (monster penalty).`,
     options: heroOptions,
@@ -145,7 +145,7 @@ const applyMonsterAttackEffects = (
 
   // Broadcast result immediately before any prompts
   getIo().to(roomCode).emit('monsterAttackResult', {
-    attackerName: player.username ?? socket.id,
+    attackerName: player.username ?? pidOf(socket),
     monsterName,
     roll: finalTotal,
     requiredRoll: upperBound,
@@ -212,7 +212,7 @@ const applyMonsterAttackEffects = (
     }
   }
 
-  applyWinIfMet(gameState, player, socket.id);
+  applyWinIfMet(gameState, player, pidOf(socket));
 
   sendRoomUpdate();
 };
@@ -234,7 +234,7 @@ const executeMonsterAttackRoll = (
   const lowerBound = monsterTemplate.lowerBound ?? 0;
   const monsterName = monsterTemplate.name ?? monster.templateId;
 
-  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, socket.id);
+  const opponentsWithModifiers = getOpponentsWithModifiers(gameState, pidOf(socket));
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
   const rollerNeedsPrompt = currentTotal < upperBound && rollerHasModifiers;
 
@@ -245,7 +245,7 @@ const executeMonsterAttackRoll = (
     upperBound,
     lowerBound,
     contested: rollerNeedsPrompt || opponentsWithModifiers.length > 0,
-  }, socket.id);
+  }, pidOf(socket));
 
   const success = currentTotal >= upperBound;
   const statusWord = success ? 'Hit!' : currentTotal < lowerBound ? 'Penalty!' : 'Miss.';
@@ -266,7 +266,7 @@ const executeMonsterAttackRoll = (
     rollContext: 'ATTACK_MONSTER',
     rollType: 'monster_attack',
     heroInstanceId: monster.instanceId,
-    rollingPlayerId: socket.id,
+    rollingPlayerId: pidOf(socket),
     phase: initialPhase,
     allOpponentsWithModifiers: opponentsWithModifiers,
     opponentQueue: [...opponentsWithModifiers],

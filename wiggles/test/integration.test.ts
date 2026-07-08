@@ -16,8 +16,8 @@ beforeAll(async () => { port = await startServer(); });
 afterAll(async () => { await stopServer(); });
 afterEach(() => { for (const c of open.splice(0)) c.close(); dice.next = [3, 3]; });
 
-const newClient = async (roomCode: string, name: string) => {
-  const c = await connect(port, roomCode, name);
+const newClient = async (roomCode: string, name: string, playerId?: string) => {
+  const c = await connect(port, roomCode, name, playerId);
   open.push(c);
   return c;
 };
@@ -242,12 +242,32 @@ describe('integration — party leader ability', () => {
   });
 });
 
-describe('integration — disconnect', () => {
-  it('removes a player from the room when their socket disconnects', async () => {
+describe('integration — disconnect & reconnect', () => {
+  it('holds a mid-game seat when the socket disconnects', async () => {
     const { a, b } = await setupInProgress();
     const bId = b.id;
     b.close();
-    const st = await a.waitState((g: GameState) => !g.players[bId]);
-    expect(st.players[bId]).toBeUndefined();
+    const st = await a.waitState((g: GameState) => g.players[bId]?.connected === false);
+    expect(st.players[bId]!.connected).toBe(false);
+  });
+
+  it('reclaims the held seat (hand intact) on reconnect with the same playerId', async () => {
+    const roomCode = await createRoom(port);
+    const a = await newClient(roomCode, 'A');
+    const b = await newClient(roomCode, 'B', 'pid-b');
+    await a.waitState(gs => Object.keys(gs.players).length === 2);
+
+    const gs = getRoomState(roomCode)!;
+    gs.status = 'in_progress';
+    gs.activePlayerId = a.id;
+    gs.players['pid-b']!.zones.hand = [makeCard('s_001')];
+
+    b.close();
+    await a.waitState(g => g.players['pid-b']?.connected === false);
+
+    const b2 = await newClient(roomCode, 'B', 'pid-b');
+    const st = await a.waitState(g => g.players['pid-b']?.connected !== false);
+    expect(st.players['pid-b']!.zones.hand).toHaveLength(1);
+    expect(b2.id).not.toBe('pid-b'); // new socket, same seat
   });
 });

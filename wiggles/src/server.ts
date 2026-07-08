@@ -17,6 +17,7 @@ import { drawCards, initializeDecks, loadAllCardTemplates } from './cards.js';
 import {
   rooms, getRoomState, setIo, getIo, emitAbilityPrompt, buildPromptId, abilityPromptRequests,
   pendingChallenges, modifierPhases, heroesPlayedFromAbilityThisTurn, markHeroPlayedFromAbility,
+  registerPlayerSocket, unregisterPlayerSocket, socketIdForPlayer, playerSocketKey, seatRemovalTimers,
 } from './state.js';
 import type { AbilityPromptOption } from './state.js';
 import {
@@ -101,7 +102,10 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     origin: API_URL,
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  // Briefly-dropped connections (same tab, short network blip) resume with
+  // their socket session intact instead of surfacing as a full disconnect.
+  connectionStateRecovery: {},
 });
 
 // Register the io instance so state.ts (and through it every engine module) can
@@ -155,11 +159,16 @@ const beginPartyLeaderSelection = (gameState: GameState) => {
   gameState.currentSelectionPlayerId = selectionOrder[0];
   gameState.diceRolls = {};
   logGame(gameState, 'party_leader_selection_started', { selectionOrder });
+  // The first picker may be a seat held for a disconnected player.
+  ensureSelectionProgress(gameState.gameId, gameState);
 };
 
 const beginInProgress = (gameState: GameState) => {
   gameState.status = 'in_progress';
-  gameState.activePlayerId = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
+  const desired = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
+  gameState.activePlayerId = isSeatConnected(gameState, desired)
+    ? desired
+    : nextConnectedAfter(gameState, desired) ?? desired;
   for (const pid of Object.keys(gameState.players)) {
     const p = gameState.players[pid];
     if (!p) continue;
@@ -186,6 +195,271 @@ const scheduleAutoAdvance = (roomCode: string, gameState: GameState) => {
   autoAdvanceTimers.set(roomCode, timer);
 };
 
+// ── Reconnection & seat grace ────────────────────────────────────────────────
+// Once a game has started, a disconnected player's seat (hand, party, slain
+// monsters) is held for SEAT_GRACE_MS so they can reconnect: the client keeps
+// a persistent playerId in localStorage and presents it in the handshake. In
+// the lobby (and after a game finishes) there is nothing to hold, so seats
+// are removed immediately.
+const SEAT_GRACE_MS = 120_000;
+
+const isSeatConnected = (gameState: GameState, playerId: string | undefined) =>
+  !!playerId && !!gameState.players[playerId] && gameState.players[playerId]?.connected !== false;
+
+// Next seat after `fromPid` in table order whose player is connected. Wraps
+// all the way around, so a lone connected player keeps their own turn.
+const nextConnectedAfter = (gameState: GameState, fromPid: string): string | undefined => {
+  const ids = Object.keys(gameState.players);
+  const start = ids.indexOf(fromPid);
+  for (let i = 1; i <= ids.length; i++) {
+    const candidate = ids[(start + i) % ids.length];
+    if (candidate && isSeatConnected(gameState, candidate)) return candidate;
+  }
+  return undefined;
+};
+
+const cancelSeatRemoval = (roomCode: string, playerId: string): { disconnectedAt: number } | undefined => {
+  const key = playerSocketKey(roomCode, playerId);
+  const entry = seatRemovalTimers.get(key);
+  if (!entry) return undefined;
+  clearTimeout(entry.timer);
+  seatRemovalTimers.delete(key);
+  return entry;
+};
+
+// Permanently drop a seat: lobby leave, game-over leave, or grace expiry.
+const removePlayerSeat = (roomCode: string, gameState: GameState, playerId: string, reason: string) => {
+  const player = gameState.players[playerId];
+  if (!player) return;
+
+  cancelSeatRemoval(roomCode, playerId);
+  logGame(gameState, 'player_removed', { username: player.username, reason }, playerId);
+  delete gameState.players[playerId];
+  if (gameState.status === 'rolling') delete gameState.diceRolls[playerId];
+
+  if (gameState.activePlayerId === playerId) {
+    gameState.activePlayerId = nextConnectedAfter(gameState, playerId) ?? Object.keys(gameState.players)[0] ?? '';
+  }
+  if (gameState.lobbyLeaderId === playerId) {
+    gameState.lobbyLeaderId = nextConnectedAfter(gameState, playerId) ?? Object.keys(gameState.players)[0];
+  }
+
+  if (Object.keys(gameState.players).length === 0) {
+    void endGameSession(gameState, 'abandoned');
+    clearAutoAdvance(roomCode);
+    pendingChallenges.delete(roomCode);
+    modifierPhases.delete(roomCode);
+    delete rooms[roomCode];
+    return;
+  }
+
+  // The departed seat may have been holding up the roll or leader selection.
+  if (gameState.status === 'rolling' && gameState.currentRollerId === playerId) {
+    advanceFirstRoll(roomCode, gameState);
+  }
+  if (gameState.status === 'party_leader_selection') {
+    ensureSelectionProgress(roomCode, gameState);
+  }
+
+  broadcastRoomUpdate(roomCode);
+};
+
+const scheduleSeatRemoval = (roomCode: string, playerId: string) => {
+  cancelSeatRemoval(roomCode, playerId);
+  const timer = setTimeout(() => {
+    seatRemovalTimers.delete(playerSocketKey(roomCode, playerId));
+    const gs = getRoomState(roomCode);
+    if (!gs) return;
+    const player = gs.players[playerId];
+    if (!player || player.connected !== false) return; // reconnected meanwhile
+    logEvent(gs, 'system', `${nameOf(gs, playerId)}'s seat was released after ${Math.round(SEAT_GRACE_MS / 60000)} minutes.`, { id: playerId, username: player.username });
+    removePlayerSeat(roomCode, gs, playerId, 'grace_expired');
+  }, SEAT_GRACE_MS);
+  timer.unref?.();
+  seatRemovalTimers.set(playerSocketKey(roomCode, playerId), { timer, disconnectedAt: Date.now() });
+};
+
+// Turn advancement shared by endTurn and a mid-turn disconnect (forced pass).
+// Skips seats held for disconnected players.
+const advanceTurn = (roomCode: string, gameState: GameState, fromPid: string, forced: boolean) => {
+  const currentPlayer = gameState.players[fromPid];
+  if (currentPlayer) {
+    decrementTemporaryModifiers(currentPlayer);
+  }
+
+  const nextPlayerId = nextConnectedAfter(gameState, fromPid) ?? '';
+  gameState.activePlayerId = nextPlayerId;
+  gameState.turnNumber = (gameState.turnNumber ?? 0) + 1;
+
+  const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
+  if (nextPlayer) {
+    nextPlayer.actionPoints = 3;
+    for (const slainMonster of nextPlayer.slainMonsters ?? []) {
+      const mt = gameState.cardTemplates[slainMonster.templateId];
+      if (mt?.slainEffect?.action === 'EXTRA_AP') nextPlayer.actionPoints += mt.slainEffect.amount ?? 0;
+    }
+    // Reset ability usage flags for new active player
+    nextPlayer.zones.party.forEach((card) => {
+      card.effectUsedThisTurn = false;
+    });
+    nextPlayer.zones.hand.forEach((card) => {
+      card.effectUsedThisTurn = false;
+    });
+  }
+
+  heroesPlayedFromAbilityThisTurn.delete(roomCode);
+  delete gameState.roomFlags;
+
+  logEvent(gameState, 'system', forced
+    ? `${nameOf(gameState, fromPid)} disconnected — their turn passes to ${nameOf(gameState, nextPlayerId)}.`
+    : `${nameOf(gameState, fromPid)} ended their turn. It is now ${nameOf(gameState, nextPlayerId)}'s turn.`,
+    { id: fromPid, username: currentPlayer?.username });
+  logGame(gameState, 'turn_ended', { forced, nextPlayerId }, fromPid);
+  logGame(gameState, 'turn_started', {
+    turnNumber: gameState.turnNumber,
+    actionPoints: nextPlayer?.actionPoints,
+  }, nextPlayerId);
+};
+
+// Move the first-player roll along: hand the dice to the next connected player
+// who hasn't rolled; when none remain (held seats simply don't roll), decide
+// the winner and enter roll_complete.
+const advanceFirstRoll = (roomCode: string, gameState: GameState) => {
+  const next = Object.keys(gameState.players).find(id =>
+    !(id in gameState.diceRolls) && isSeatConnected(gameState, id));
+  if (next) {
+    gameState.currentRollerId = next;
+    return;
+  }
+
+  let maxRoll = 0;
+  let winnerId = '';
+  for (const [playerId, roll] of Object.entries(gameState.diceRolls)) {
+    if (roll > maxRoll) {
+      maxRoll = roll;
+      winnerId = playerId;
+    }
+  }
+
+  gameState.activePlayerId = winnerId;
+  gameState.firstPlayerId = winnerId;
+  gameState.currentRollerId = undefined;
+  gameState.rollWinnerId = winnerId;
+  gameState.turnNumber = 1;
+  gameState.phase = 'DRAW';
+  gameState.status = 'roll_complete';
+  logGame(gameState, 'turn_order_decided', { rolls: gameState.diceRolls, firstPlayerId: winnerId });
+  scheduleAutoAdvance(roomCode, gameState);
+};
+
+// Advance leader selection one step, entering review once the order is done.
+const advanceLeaderSelection = (roomCode: string, gameState: GameState) => {
+  const order = gameState.partyLeaderSelectionOrder;
+  const currentIndex = order.findIndex((id) => id === gameState.currentSelectionPlayerId);
+  const nextIndex = currentIndex + 1;
+
+  if (nextIndex < order.length) {
+    gameState.currentSelectionPlayerId = order[nextIndex];
+  } else {
+    gameState.currentSelectionPlayerId = undefined;
+    gameState.status = 'party_leader_review';
+    if (gameState.activeMonsters.length === 0) {
+      gameState.activeMonsters = drawCards(gameState.monsterDeck, 3) as MonsterInstance[];
+    }
+    scheduleAutoAdvance(roomCode, gameState);
+  }
+};
+
+// While the pick belongs to a disconnected (or removed) seat, auto-assign the
+// top available leader so selection never stalls waiting for someone who
+// isn't there. The seat keeps the leader for when they reconnect.
+const ensureSelectionProgress = (roomCode: string, gameState: GameState) => {
+  while (gameState.status === 'party_leader_selection' && gameState.currentSelectionPlayerId) {
+    const currentPid = gameState.currentSelectionPlayerId;
+    const player = gameState.players[currentPid];
+    if (player && player.connected !== false) return;
+    if (player && !player.partyLeaderId) {
+      const card = gameState.availablePartyLeaderCards.shift();
+      if (card) {
+        player.zones.party = [card];
+        player.partyLeaderId = card.templateId;
+        logEvent(gameState, 'system', `${nameOf(gameState, currentPid)} is disconnected — ${gameState.cardTemplates[card.templateId]?.name ?? 'a party leader'} was chosen for them.`, { id: currentPid, username: player.username });
+        logGame(gameState, 'party_leader_chosen', {
+          templateId: card.templateId,
+          auto: true,
+          remainingChoices: gameState.availablePartyLeaderCards.map(c => c.templateId),
+        }, currentPid);
+      }
+    }
+    advanceLeaderSelection(roomCode, gameState);
+  }
+};
+
+// Resolve everything the game may be waiting on from a player who just went
+// away: pending challenge participation, modifier phase turns, their active
+// turn, their first-player roll, or their leader pick. Decisions default to
+// "pass" — the seat itself survives (or not) per the caller's rules.
+const resolveDeparture = (roomCode: string, gameState: GameState, playerId: string) => {
+  const pending = pendingChallenges.get(roomCode);
+  if (pending) {
+    if (pending.pendingPlayerId === playerId) {
+      gameState.discardPile.push(pending.pendingCardInstance);
+      pendingChallenges.delete(roomCode);
+      delete gameState.pendingChallenge;
+    } else if (pending.eligibleChallengerIds.includes(playerId)) {
+      pending.passedPlayerIds.add(playerId);
+      const remaining = pending.eligibleChallengerIds.filter(id => !pending.passedPlayerIds.has(id));
+      if (remaining.length === 0 && !pending.challengerId) {
+        executePendingCardPlay(roomCode, pending, gameState);
+        pendingChallenges.delete(roomCode);
+        delete gameState.pendingChallenge;
+      } else {
+        const gsPending = gameState.pendingChallenge;
+        if (gsPending) gsPending.eligibleChallengerIds = remaining;
+      }
+    }
+  }
+
+  const modPhase = modifierPhases.get(roomCode);
+  if (modPhase) {
+    if (modPhase.rollingPlayerId === playerId) {
+      modifierPhases.delete(roomCode);
+      delete gameState.modifierPhase;
+    } else if (modPhase.allOpponentsWithModifiers.includes(playerId)) {
+      modPhase.allOpponentsWithModifiers = modPhase.allOpponentsWithModifiers.filter(id => id !== playerId);
+      modPhase.opponentQueue = modPhase.opponentQueue.filter(id => id !== playerId);
+      if (modPhase.phase === 'opponent_turn' && modPhase.opponentQueue.length === 0) {
+        if (modPhase.cardPlayedThisCycle) {
+          const newQueue = modPhase.allOpponentsWithModifiers.filter(
+            id => gameState.players[id]?.zones.hand.some(c => c.cardType === 'modifier')
+          );
+          if (newQueue.length === 0) {
+            finalizeRoll(roomCode, modPhase, gameState, () => broadcastRoomUpdate(roomCode));
+          } else {
+            modPhase.opponentQueue = newQueue;
+            modPhase.cardPlayedThisCycle = false;
+            updateModifierPhaseGameState(roomCode, modPhase, gameState);
+          }
+        } else {
+          finalizeRoll(roomCode, modPhase, gameState, () => broadcastRoomUpdate(roomCode));
+        }
+      } else {
+        updateModifierPhaseGameState(roomCode, modPhase, gameState);
+      }
+    }
+  }
+
+  if (gameState.status === 'in_progress' && gameState.activePlayerId === playerId) {
+    advanceTurn(roomCode, gameState, playerId, true);
+  }
+  if (gameState.status === 'rolling' && gameState.currentRollerId === playerId) {
+    advanceFirstRoll(roomCode, gameState);
+  }
+  if (gameState.status === 'party_leader_selection') {
+    ensureSelectionProgress(roomCode, gameState);
+  }
+};
+
 // The per-connection handler. Exported so tests can drive it with a fake socket
 // (and fake io via setIo) without booting a real server. It resolves the live io
 // through getIo() so broadcasts go to whichever server instance is registered.
@@ -200,7 +474,13 @@ const handleConnection = (socket: Socket) => {
     return;
   }
 
-  const isExistingPlayer = !!gameState.players[socket.id];
+  // Stable identity: the client keeps a UUID in localStorage and sends it on
+  // every handshake, so a reconnect (new socket) maps back to the same seat.
+  // Clients that don't send one (old builds, tests) fall back to the socket id.
+  const rawPlayerId = socket.handshake.auth.playerId;
+  const pid = (typeof rawPlayerId === 'string' && rawPlayerId.trim()) || socket.id;
+
+  const isExistingPlayer = !!gameState.players[pid];
   if (!isExistingPlayer && Object.keys(gameState.players).length >= 6) {
     socket.emit('roomFull', 'This room is full (6 players max).');
     socket.disconnect();
@@ -208,14 +488,26 @@ const handleConnection = (socket: Socket) => {
   }
 
   socket.data.roomCode = roomCode;
+  socket.data.playerId = pid;
   socket.join(roomCode);
 
-  const player = gameState.players[socket.id];
+  // If this seat already has a live socket (second tab, or a reconnect racing
+  // the old socket's disconnect), the newest connection wins. Rebind first so
+  // the old socket's disconnect handler sees itself superseded and leaves the
+  // seat alone.
+  const previousSocketId = socketIdForPlayer(roomCode, pid);
+  registerPlayerSocket(roomCode, pid, socket.id);
+  if (previousSocketId && previousSocketId !== socket.id) {
+    getIo().sockets.sockets.get(previousSocketId)?.disconnect();
+  }
+
+  const player = gameState.players[pid];
   if (!player) {
-    gameState.players[socket.id] = {
-      id: socket.id,
+    gameState.players[pid] = {
+      id: pid,
       username: username ?? nextDefaultUsername(gameState),
       ready: false,
+      connected: true,
       actionPoints: 3,
       partyLeaderId: undefined,
       slainMonsters: [],
@@ -225,17 +517,30 @@ const handleConnection = (socket: Socket) => {
       }
     };
     // No-op unless a game is in progress (lobby joins have no session yet).
-    logGame(gameState, 'player_joined', { username: gameState.players[socket.id]?.username }, socket.id);
-  } else if (username) {
-    player.username = username;
+    logGame(gameState, 'player_joined', { username: gameState.players[pid]?.username }, pid);
+  } else {
+    const held = cancelSeatRemoval(roomCode, pid);
+    const wasDisconnected = player.connected === false;
+    player.connected = true;
+    if (username) player.username = username;
+    if (wasDisconnected) {
+      logEvent(gameState, 'system', `${nameOf(gameState, pid)} reconnected.`, { id: pid, username: player.username });
+      logGame(gameState, 'player_reconnected', {
+        username: player.username,
+        ...(held ? { downtimeMs: Date.now() - held.disconnectedAt } : {}),
+      }, pid);
+    } else if (previousSocketId && previousSocketId !== socket.id) {
+      // Same player, new tab — seat handed to the new socket without a gap.
+      logGame(gameState, 'player_reconnected', { username: player.username, takeover: true }, pid);
+    }
   }
 
   if (!gameState.activePlayerId) {
-    gameState.activePlayerId = socket.id;
+    gameState.activePlayerId = pid;
   }
 
   if (!gameState.lobbyLeaderId) {
-    gameState.lobbyLeaderId = socket.id;
+    gameState.lobbyLeaderId = pid;
   }
 
   const sendRoomUpdate = () => {
@@ -250,11 +555,11 @@ const handleConnection = (socket: Socket) => {
   socket.on('sendChat', (message) => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState) return;
-    const sender = gameState.players[socket.id];
+    const sender = gameState.players[pid];
     if (!sender) return;
     const text = (message ?? '').toString().trim().slice(0, 500);
     if (!text) return;
-    logEvent(gameState, 'chat', text, { id: socket.id, username: sender.username });
+    logEvent(gameState, 'chat', text, { id: pid, username: sender.username });
     sendRoomUpdate();
   });
 
@@ -283,14 +588,14 @@ const handleConnection = (socket: Socket) => {
     const category: BugCategory = validBugCategories.has(report?.category as string)
       ? report.category
       : 'other';
-    const reporter = gameState.players[socket.id];
+    const reporter = gameState.players[pid];
 
     // Everything the player shouldn't have to describe: where the game stood,
     // where in the analytics replay to look, and what just happened on screen.
     void saveBugReport(roomCode, {
       reportedAt: new Date(now).toISOString(),
       roomCode,
-      reporter: { id: socket.id, username: reporter?.username },
+      reporter: { id: pid, username: reporter?.username },
       category,
       description,
       client: {
@@ -311,7 +616,7 @@ const handleConnection = (socket: Socket) => {
 
     // Also stamp the report into the game's event stream, where it lands with
     // the full board snapshot attached (no-op if no session is active).
-    logGame(gameState, 'bug_report', { category, description }, socket.id);
+    logGame(gameState, 'bug_report', { category, description }, pid);
 
     socket.emit('bugReportAck', { ok: true, message: 'Thanks — your report was sent.' });
   });
@@ -319,7 +624,7 @@ const handleConnection = (socket: Socket) => {
   socket.on('toggleReady', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'waiting') return;
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
     player.ready = !player.ready;
     sendRoomUpdate();
@@ -368,7 +673,7 @@ const handleConnection = (socket: Socket) => {
     gameState.currentSelectionPlayerId = undefined;
     gameState.currentRollerId = playerIds[0] ?? undefined;
     gameState.turnNumber = 0;
-    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} started the game.`, { id: socket.id, username: gameState.players[socket.id]?.username });
+    logEvent(gameState, 'system', `${nameOf(gameState, pid)} started the game.`, { id: pid, username: gameState.players[pid]?.username });
 
     beginGameSession(gameState);
     logGame(gameState, 'game_start', {
@@ -376,7 +681,7 @@ const handleConnection = (socket: Socket) => {
       lobbyLeaderId: gameState.lobbyLeaderId,
       targetMonstersToWin: gameState.targetMonstersToWin ?? 3,
       activeMonsters: gameState.activeMonsters.map(m => m.templateId),
-    }, socket.id);
+    }, pid);
 
     sendRoomUpdate();
   });
@@ -390,10 +695,10 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn to draw.');
       return;
     }
@@ -412,8 +717,8 @@ const handleConnection = (socket: Socket) => {
     if (!card) return;
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} drew a card.`, { id: socket.id, username: player.username });
-    logGame(gameState, 'draw_action', { templateId: card.templateId, apRemaining: player.actionPoints }, socket.id);
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} drew a card.`, { id: pid, username: player.username });
+    logGame(gameState, 'draw_action', { templateId: card.templateId, apRemaining: player.actionPoints }, pid);
 
     socket.emit('cardDrawn', { instanceId: card.instanceId, templateId: card.templateId });
 
@@ -423,11 +728,11 @@ const handleConnection = (socket: Socket) => {
   socket.on('mulligan', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'in_progress') return;
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
     if ((player.actionPoints ?? 0) < 3) {
       socket.emit('actionFailed', 'Not enough AP to mulligan (costs 3 AP).');
@@ -443,11 +748,11 @@ const handleConnection = (socket: Socket) => {
     player.zones.hand = [];
     drawCardsForPlayer(gameState, player, 5);
     player.actionPoints = (player.actionPoints ?? 0) - 3;
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} mulliganed their hand.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} mulliganed their hand.`, { id: pid, username: player.username });
     logGame(gameState, 'mulligan', {
       discarded: mulliganDiscarded,
       newHand: player.zones.hand.map(c => c.templateId),
-    }, socket.id);
+    }, pid);
 
     sendRoomUpdate();
   });
@@ -461,12 +766,12 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     if ((player.actionPoints ?? 0) < 1) {
@@ -494,20 +799,20 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} played ${gameState.cardTemplates[playedCard.templateId]?.name ?? 'a hero'}.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} played ${gameState.cardTemplates[playedCard.templateId]?.name ?? 'a hero'}.`, { id: pid, username: player.username });
 
     const roomCode = socket.data.roomCode as string;
-    const eligibleChallengerIds = getEligibleChallengerIds(gameState, socket.id);
+    const eligibleChallengerIds = getEligibleChallengerIds(gameState, pid);
     logGame(gameState, 'hero_played', {
       templateId: playedCard.templateId,
       challengeWindowOpened: eligibleChallengerIds.length > 0,
       eligibleChallengerIds,
-    }, socket.id);
+    }, pid);
 
     if (eligibleChallengerIds.length > 0) {
       openChallengeWindow(roomCode, gameState, {
         pendingCardInstance: playedCard,
-        pendingPlayerId: socket.id,
+        pendingPlayerId: pid,
         pendingCardType: 'hero',
         eligibleChallengerIds,
         passedPlayerIds: new Set(),
@@ -515,7 +820,7 @@ const handleConnection = (socket: Socket) => {
       });
     } else {
       player.zones.party.push(playedCard);
-      applyWinIfMet(gameState, player, socket.id);
+      applyWinIfMet(gameState, player, pid);
       markHeroPlayedFromAbility(roomCode, playedCard.instanceId);
       socket.emit('heroPlayAccepted', playedCard.instanceId);
     }
@@ -529,11 +834,11 @@ const handleConnection = (socket: Socket) => {
       socket.emit('actionFailed', 'Cannot play a magic card now.');
       return;
     }
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
     if ((player.actionPoints ?? 0) < 1) {
       socket.emit('actionFailed', 'Not enough AP to play a magic card.');
@@ -557,21 +862,21 @@ const handleConnection = (socket: Socket) => {
     player.actionPoints = (player.actionPoints ?? 0) - 1;
     const [removedMagicCard] = player.zones.hand.splice(cardIndex, 1);
     if (!removedMagicCard) { sendRoomUpdate(); return; }
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} played ${template.name ?? 'a magic card'}.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} played ${template.name ?? 'a magic card'}.`, { id: pid, username: player.username });
 
     const magicRoomCode = socket.data.roomCode as string;
     const steps: Effect[] = template.effect.steps ?? [template.effect as unknown as Effect];
-    const magicEligibleIds = getEligibleChallengerIds(gameState, socket.id);
+    const magicEligibleIds = getEligibleChallengerIds(gameState, pid);
     logGame(gameState, 'magic_played', {
       templateId: removedMagicCard.templateId,
       challengeWindowOpened: magicEligibleIds.length > 0,
       eligibleChallengerIds: magicEligibleIds,
-    }, socket.id);
+    }, pid);
 
     if (magicEligibleIds.length > 0) {
       openChallengeWindow(magicRoomCode, gameState, {
         pendingCardInstance: removedMagicCard,
-        pendingPlayerId: socket.id,
+        pendingPlayerId: pid,
         pendingCardType: 'magic',
         magicSteps: steps,
         eligibleChallengerIds: magicEligibleIds,
@@ -595,12 +900,12 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     if ((player.actionPoints ?? 0) < 1) {
@@ -644,25 +949,25 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 1;
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} equipped ${itemTemplate?.name ?? 'an item'} to ${gameState.cardTemplates[targetHero.templateId]?.name ?? 'a hero'}.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} equipped ${itemTemplate?.name ?? 'an item'} to ${gameState.cardTemplates[targetHero.templateId]?.name ?? 'a hero'}.`, { id: pid, username: player.username });
 
     const itemRoomCode = socket.data.roomCode as string;
     const itemEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
       ? []
-      : getEligibleChallengerIds(gameState, socket.id);
+      : getEligibleChallengerIds(gameState, pid);
     logGame(gameState, 'item_played', {
       templateId: removedItem.templateId,
       targetHeroTemplateId: targetHero.templateId,
       challengeWindowOpened: itemEligibleIds.length > 0,
       eligibleChallengerIds: itemEligibleIds,
-    }, socket.id);
+    }, pid);
 
     if (itemEligibleIds.length > 0) {
       openChallengeWindow(itemRoomCode, gameState, {
         pendingCardInstance: removedItem,
-        pendingPlayerId: socket.id,
+        pendingPlayerId: pid,
         pendingCardType: 'item',
-        itemTargetPlayerId: socket.id,
+        itemTargetPlayerId: pid,
         itemTargetHeroInstanceId: targetHeroInstanceId,
         eligibleChallengerIds: itemEligibleIds,
         passedPlayerIds: new Set(),
@@ -685,17 +990,17 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
 
-    if (socket.id === targetPlayerId) {
+    if (pid === targetPlayerId) {
       socket.emit('actionFailed', 'Cannot play cursed item on your own heroes.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     const targetPlayer = gameState.players[targetPlayerId];
@@ -749,19 +1054,19 @@ const handleConnection = (socket: Socket) => {
     const cursedRoomCode = socket.data.roomCode as string;
     const cursedEligibleIds = playerHasSlainEffectFlag(gameState, player, 'blockItemChallenges')
       ? []
-      : getEligibleChallengerIds(gameState, socket.id);
+      : getEligibleChallengerIds(gameState, pid);
     logGame(gameState, 'cursed_item_played', {
       templateId: removedCursedItem.templateId,
       targetPlayerId,
       targetHeroTemplateId: targetHero.templateId,
       challengeWindowOpened: cursedEligibleIds.length > 0,
       eligibleChallengerIds: cursedEligibleIds,
-    }, socket.id);
+    }, pid);
 
     if (cursedEligibleIds.length > 0) {
       openChallengeWindow(cursedRoomCode, gameState, {
         pendingCardInstance: removedCursedItem,
-        pendingPlayerId: socket.id,
+        pendingPlayerId: pid,
         pendingCardType: 'item',
         itemTargetPlayerId: targetPlayerId,
         itemTargetHeroInstanceId: targetHeroInstanceId,
@@ -791,12 +1096,12 @@ const handleConnection = (socket: Socket) => {
       socket.emit('actionFailed', 'This card play has already been challenged.');
       return;
     }
-    if (!pending.eligibleChallengerIds.includes(socket.id) || pending.passedPlayerIds.has(socket.id)) {
+    if (!pending.eligibleChallengerIds.includes(pid) || pending.passedPlayerIds.has(pid)) {
       socket.emit('actionFailed', 'You are not eligible to challenge.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     const challengeCard = player.zones.hand.find(
@@ -819,7 +1124,7 @@ const handleConnection = (socket: Socket) => {
       }
     }
 
-    pending.challengerId = socket.id;
+    pending.challengerId = pid;
     pending.challengeCardInstanceId = challengeCardInstanceId;
     pending.challengerRollBonus = getChallengeCardBonus(template);
     logGame(gameState, 'challenge_played', {
@@ -828,10 +1133,10 @@ const handleConnection = (socket: Socket) => {
       againstPlayerId: pending.pendingPlayerId,
       againstCardTemplateId: pending.pendingCardInstance.templateId,
       againstCardType: pending.pendingCardType,
-    }, socket.id);
+    }, pid);
 
     const gsPending = gameState.pendingChallenge;
-    if (gsPending) gsPending.challengerId = socket.id;
+    if (gsPending) gsPending.challengerId = pid;
 
     const challengedPlayerId = pending.pendingPlayerId;
     resolveChallengeRollOff(roomCode, pending, gameState, sendRoomUpdate);
@@ -849,11 +1154,11 @@ const handleConnection = (socket: Socket) => {
         label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
         payload: { cardInstanceId: c.instanceId },
       }));
-      emitAbilityPrompt(socket.id, {
+      emitAbilityPrompt(pid, {
         promptId: buildPromptId(),
         roomCode,
         heroInstanceId: '',
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pid,
         promptType: 'discardCard',
         message: 'Bloodwing: you challenged its owner — discard a card.',
         options: opts,
@@ -872,15 +1177,15 @@ const handleConnection = (socket: Socket) => {
 
     const pending = pendingChallenges.get(roomCode);
     if (!pending || pending.challengerId) return;
-    if (!pending.eligibleChallengerIds.includes(socket.id) || pending.passedPlayerIds.has(socket.id)) return;
+    if (!pending.eligibleChallengerIds.includes(pid) || pending.passedPlayerIds.has(pid)) return;
 
-    pending.passedPlayerIds.add(socket.id);
+    pending.passedPlayerIds.add(pid);
     const remaining = pending.eligibleChallengerIds.filter(id => !pending.passedPlayerIds.has(id));
     logGame(gameState, 'challenge_passed', {
       againstCardTemplateId: pending.pendingCardInstance.templateId,
       remainingEligible: remaining,
       resolvedUnchallenged: remaining.length === 0,
-    }, socket.id);
+    }, pid);
 
     if (remaining.length === 0) {
       executePendingCardPlay(roomCode, pending, gameState);
@@ -910,8 +1215,8 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const isRollerTurn = phase.phase === 'roller_turn' && socket.id === phase.rollingPlayerId;
-    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === socket.id;
+    const isRollerTurn = phase.phase === 'roller_turn' && pid === phase.rollingPlayerId;
+    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === pid;
     if (!isRollerTurn && !isOpponentTurn) {
       socket.emit('actionFailed', 'It is not your turn to play a modifier.');
       return;
@@ -919,12 +1224,12 @@ const handleConnection = (socket: Socket) => {
 
     // h_002 Shadow Saint: no player other than the active player may play
     // Modifier cards until the end of the active player's turn.
-    if (gameState.roomFlags?.lockModifiers && socket.id !== gameState.activePlayerId) {
+    if (gameState.roomFlags?.lockModifiers && pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Modifier cards are locked for other players this turn.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     const cardIndex = player.zones.hand.findIndex(c => c.instanceId === modifierInstanceId && c.cardType === 'modifier');
@@ -955,13 +1260,13 @@ const handleConnection = (socket: Socket) => {
     }
     // m_017 Abyss Queen: when an OPPONENT plays a modifier on the roller's roll,
     // the roller gains a flat bonus to that roll.
-    if (socket.id !== phase.rollingPlayerId) {
+    if (pid !== phase.rollingPlayerId) {
       const roller = gameState.players[phase.rollingPlayerId];
       if (roller) phase.accumulatedModifier += getSlainOpponentModifierBonus(gameState, roller);
     }
 
     phase.modifiersPlayed.push({
-      playerName: player.username ?? socket.id,
+      playerName: player.username ?? pid,
       cardName: template?.name ?? card.templateId,
       amount,
       choiceLabel,
@@ -974,7 +1279,7 @@ const handleConnection = (socket: Socket) => {
       rollingPlayerId: phase.rollingPlayerId,
       newTotal: phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier,
       requiredRoll: phase.requiredRoll,
-    }, socket.id);
+    }, pid);
 
     // m_006 Crowned Serpent: each time ANY player plays a modifier, every player
     // who has slain a Crowned Serpent may draw a card.
@@ -1014,8 +1319,8 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const isRollerTurn = phase.phase === 'roller_turn' && socket.id === phase.rollingPlayerId;
-    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === socket.id;
+    const isRollerTurn = phase.phase === 'roller_turn' && pid === phase.rollingPlayerId;
+    const isOpponentTurn = phase.phase === 'opponent_turn' && phase.opponentQueue[0] === pid;
     if (!isRollerTurn && !isOpponentTurn) {
       socket.emit('actionFailed', 'It is not your turn to pass.');
       return;
@@ -1027,7 +1332,7 @@ const handleConnection = (socket: Socket) => {
       phaseStage: phase.phase,
       currentTotal: phase.rawDiceTotal + phase.persistentBonus + phase.accumulatedModifier,
       requiredRoll: phase.requiredRoll,
-    }, socket.id);
+    }, pid);
 
     if (phase.phase === 'roller_turn') {
       phase.phase = 'opponent_turn';
@@ -1051,7 +1356,7 @@ const handleConnection = (socket: Socket) => {
     const roomCode = socket.data.roomCode as string;
     const gameState = getRoomState(roomCode);
     if (!gameState || gameState.status !== 'in_progress') return;
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
@@ -1060,7 +1365,7 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     const partyLeaderCard = player.zones.party.find(c => c.cardType === 'party_leader');
@@ -1090,7 +1395,7 @@ const handleConnection = (socket: Socket) => {
 
     if (template.effect.action === 'STEAL_CARD') {
       const opponents = Object.entries(gameState.players).filter(
-        ([id, p]) => id !== socket.id && p.zones.hand.length > 0
+        ([id, p]) => id !== pid && p.zones.hand.length > 0
       );
       if (opponents.length === 0) {
         player.actionPoints = (player.actionPoints ?? 0) + apCost;
@@ -1102,12 +1407,12 @@ const handleConnection = (socket: Socket) => {
         label: `${p.username ?? id} (${p.zones.hand.length} card${p.zones.hand.length !== 1 ? 's' : ''})`,
         payload: { playerId: id },
       }));
-      logGame(gameState, 'party_leader_ability_used', { action: 'STEAL_CARD', apCost }, socket.id);
-      emitAbilityPrompt(socket.id, {
+      logGame(gameState, 'party_leader_ability_used', { action: 'STEAL_CARD', apCost }, pid);
+      emitAbilityPrompt(pid, {
         promptId: buildPromptId(),
         roomCode,
         heroInstanceId: partyLeaderCard.instanceId,
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pid,
         promptType: 'selectPlayer',
         message: 'Choose an opponent to steal a card from.',
         options,
@@ -1129,12 +1434,12 @@ const handleConnection = (socket: Socket) => {
           payload: { cardInstanceId: card.instanceId },
         };
       });
-      logGame(gameState, 'party_leader_ability_used', { action: 'SEARCH_DISCARD', apCost }, socket.id);
-      emitAbilityPrompt(socket.id, {
+      logGame(gameState, 'party_leader_ability_used', { action: 'SEARCH_DISCARD', apCost }, pid);
+      emitAbilityPrompt(pid, {
         promptId: buildPromptId(),
         roomCode,
         heroInstanceId: partyLeaderCard.instanceId,
-        sourcePlayerId: socket.id,
+        sourcePlayerId: pid,
         promptType: 'selectCard',
         message: 'Choose a card from the discard pile to add to your hand.',
         options,
@@ -1151,7 +1456,7 @@ const handleConnection = (socket: Socket) => {
     const gameState = getRoomState(roomCode);
     if (!gameState || gameState.status !== 'in_progress') return;
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
@@ -1161,7 +1466,7 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     if ((player.actionPoints ?? 0) < 2) {
@@ -1187,11 +1492,11 @@ const handleConnection = (socket: Socket) => {
     }
 
     player.actionPoints = (player.actionPoints ?? 0) - 2;
-    logEvent(gameState, 'action', `${nameOf(gameState, socket.id)} is attacking ${monsterTemplate.name ?? 'a monster'}.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'action', `${nameOf(gameState, pid)} is attacking ${monsterTemplate.name ?? 'a monster'}.`, { id: pid, username: player.username });
     logGame(gameState, 'monster_attack_started', {
       monsterTemplateId: monster.templateId,
       apRemaining: player.actionPoints,
-    }, socket.id);
+    }, pid);
     executeMonsterAttackRoll(roomCode, socket, gameState, player, monster, monsterTemplate, sendRoomUpdate);
   });
 
@@ -1204,12 +1509,12 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
 
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     const hero = player.zones.party.find((card) => card.instanceId === heroInstanceId);
@@ -1286,11 +1591,11 @@ const handleConnection = (socket: Socket) => {
                 label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
                 payload: { cardInstanceId: c.instanceId },
               }));
-              emitAbilityPrompt(socket.id, {
+              emitAbilityPrompt(pid, {
                 promptId: buildPromptId(),
                 roomCode: socket.data.roomCode as string,
                 heroInstanceId: hero.instanceId,
-                sourcePlayerId: socket.id,
+                sourcePlayerId: pid,
                 promptType: 'multiSelectCard',
                 message: `${itemTemplate?.name ?? itemInstance.templateId}: select up to ${availableMax} card${availableMax > 1 ? 's' : ''} to discard for +${bonusPerCard} each, then confirm.`,
                 options: cardOptions,
@@ -1315,11 +1620,11 @@ const handleConnection = (socket: Socket) => {
   socket.on('activateHeroAbility', (heroInstanceId) => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'in_progress') return;
-    if (socket.id !== gameState.activePlayerId) {
+    if (pid !== gameState.activePlayerId) {
       socket.emit('actionFailed', 'Not your turn.');
       return;
     }
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) return;
 
     activateHeroAbility(socket, gameState, heroInstanceId, sendRoomUpdate);
@@ -1337,7 +1642,7 @@ const handleConnection = (socket: Socket) => {
       effectAction: prompt.effect.action,
       selected: selectedOptionIds.map(id => prompt.options.find(o => o.id === id)?.label ?? id),
       selectedOptionIds,
-    }, socket.id);
+    }, pid);
   };
 
   socket.on('respondToAbilityPrompt', (promptId, selectedOptionId) => {
@@ -1356,11 +1661,11 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.currentRollerId) {
+    if (pid !== gameState.currentRollerId) {
       return;
     }
 
-      const player = gameState.players[socket.id];
+      const player = gameState.players[pid];
       if (!player) return;
 
     const die1 = Math.floor(Math.random() * 6) + 1;
@@ -1368,36 +1673,10 @@ const handleConnection = (socket: Socket) => {
     const total = die1 + die2;
 
     // Initial "roll for first" should not include any temporary roll bonuses.
-    gameState.diceRolls[socket.id] = total;
-    logGame(gameState, 'turn_order_roll', { die1, die2, total }, socket.id);
+    gameState.diceRolls[pid] = total;
+    logGame(gameState, 'turn_order_roll', { die1, die2, total }, pid);
 
-    const playerIds = Object.keys(gameState.players);
-    const rolledPlayerIds = Object.keys(gameState.diceRolls);
-    const nextRollerIndex = playerIds.findIndex(id => !rolledPlayerIds.includes(id));
-
-    if (nextRollerIndex >= 0) {
-      gameState.currentRollerId = playerIds[nextRollerIndex] ?? undefined;
-    } else {
-      let maxRoll = 0;
-      let winnerId = '';
-
-      for (const [playerId, roll] of Object.entries(gameState.diceRolls)) {
-        if (roll > maxRoll) {
-          maxRoll = roll;
-          winnerId = playerId;
-        }
-      }
-
-      gameState.activePlayerId = winnerId;
-      gameState.firstPlayerId = winnerId;
-      gameState.currentRollerId = undefined;
-      gameState.rollWinnerId = winnerId;
-      gameState.turnNumber = 1;
-      gameState.phase = 'DRAW';
-      gameState.status = 'roll_complete';
-      logGame(gameState, 'turn_order_decided', { rolls: gameState.diceRolls, firstPlayerId: winnerId });
-      scheduleAutoAdvance(socket.data.roomCode as string, gameState);
-    }
+    advanceFirstRoll(socket.data.roomCode as string, gameState);
 
     sendRoomUpdate();
   });
@@ -1410,7 +1689,7 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.lobbyLeaderId) {
+    if (pid !== gameState.lobbyLeaderId) {
       return;
     }
 
@@ -1429,7 +1708,7 @@ const handleConnection = (socket: Socket) => {
   socket.on('endTurn', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'in_progress') return;
-    if (socket.id !== gameState.activePlayerId) return;
+    if (pid !== gameState.activePlayerId) return;
     if (pendingChallenges.has(socket.data.roomCode as string)) {
       socket.emit('actionFailed', 'Cannot end turn while a challenge is pending.');
       return;
@@ -1439,46 +1718,7 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-      const currentPlayer = gameState.players[socket.id];
-      if (currentPlayer) {
-        decrementTemporaryModifiers(currentPlayer);
-      }
-
-    const playerIds = Object.keys(gameState.players);
-    if (playerIds.length === 0) return;
-
-    const currentIndex = playerIds.findIndex((id) => id === socket.id);
-    const nextIndex = (currentIndex + 1) % playerIds.length;
-    const nextPlayerId = playerIds[nextIndex] ?? '';
-
-    gameState.activePlayerId = nextPlayerId;
-    gameState.turnNumber = (gameState.turnNumber ?? 0) + 1;
-
-    const nextPlayer = nextPlayerId ? gameState.players[nextPlayerId] : undefined;
-    if (nextPlayer) {
-      nextPlayer.actionPoints = 3;
-      for (const slainMonster of nextPlayer.slainMonsters ?? []) {
-        const mt = gameState.cardTemplates[slainMonster.templateId];
-        if (mt?.slainEffect?.action === 'EXTRA_AP') nextPlayer.actionPoints += mt.slainEffect.amount ?? 0;
-      }
-      // Reset ability usage flags for new active player
-      nextPlayer.zones.party.forEach((card) => {
-        card.effectUsedThisTurn = false;
-      });
-      nextPlayer.zones.hand.forEach((card) => {
-        card.effectUsedThisTurn = false;
-      });
-    }
-
-    heroesPlayedFromAbilityThisTurn.delete(socket.data.roomCode as string);
-    delete gameState.roomFlags;
-
-    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} ended their turn. It is now ${nameOf(gameState, nextPlayerId)}'s turn.`, { id: socket.id, username: currentPlayer?.username });
-    logGame(gameState, 'turn_ended', { forced: false, nextPlayerId }, socket.id);
-    logGame(gameState, 'turn_started', {
-      turnNumber: gameState.turnNumber,
-      actionPoints: nextPlayer?.actionPoints,
-    }, nextPlayerId);
+    advanceTurn(socket.data.roomCode as string, gameState, pid, false);
 
     sendRoomUpdate();
   });
@@ -1489,7 +1729,7 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    if (socket.id !== gameState.currentSelectionPlayerId) {
+    if (pid !== gameState.currentSelectionPlayerId) {
       return;
     }
 
@@ -1505,34 +1745,22 @@ const handleConnection = (socket: Socket) => {
     if (!chosenCard) {
       return;
     }
-    const player = gameState.players[socket.id];
+    const player = gameState.players[pid];
     if (!player) {
       return;
     }
 
     player.zones.party = [chosenCard];
     player.partyLeaderId = chosenCard.templateId;
-    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} chose ${gameState.cardTemplates[chosenCard.templateId]?.name ?? 'a party leader'} as their party leader.`, { id: socket.id, username: player.username });
+    logEvent(gameState, 'system', `${nameOf(gameState, pid)} chose ${gameState.cardTemplates[chosenCard.templateId]?.name ?? 'a party leader'} as their party leader.`, { id: pid, username: player.username });
     logGame(gameState, 'party_leader_chosen', {
       templateId: chosenCard.templateId,
       remainingChoices: gameState.availablePartyLeaderCards.map(c => c.templateId),
-    }, socket.id);
+    }, pid);
 
-    const currentIndex = gameState.partyLeaderSelectionOrder.findIndex(
-      (id) => id === socket.id
-    );
-    const nextIndex = currentIndex + 1;
-
-    if (nextIndex < gameState.partyLeaderSelectionOrder.length) {
-      gameState.currentSelectionPlayerId = gameState.partyLeaderSelectionOrder[nextIndex];
-    } else {
-      gameState.currentSelectionPlayerId = undefined;
-      gameState.status = 'party_leader_review';
-      if (gameState.activeMonsters.length === 0) {
-        gameState.activeMonsters = drawCards(gameState.monsterDeck, 3) as MonsterInstance[];
-      }
-      scheduleAutoAdvance(socket.data.roomCode as string, gameState);
-    }
+    advanceLeaderSelection(socket.data.roomCode as string, gameState);
+    // The next picker may be a held (disconnected) seat — auto-pick for them.
+    ensureSelectionProgress(socket.data.roomCode as string, gameState);
 
     sendRoomUpdate();
   });
@@ -1542,7 +1770,7 @@ const handleConnection = (socket: Socket) => {
     if (!gameState) return;
 
     // Close the analytics session while the final board is still intact.
-    void endGameSession(gameState, 'reset', { resetBy: socket.id });
+    void endGameSession(gameState, 'reset', { resetBy: pid });
 
     gameState.status = 'waiting';
     gameState.activePlayerId = gameState.lobbyLeaderId || '';
@@ -1568,6 +1796,15 @@ const handleConnection = (socket: Socket) => {
     gameState.partyLeaderSelectionOrder = [];
     gameState.currentSelectionPlayerId = undefined;
 
+    // Back in the lobby there is no seat-holding — drop anyone still
+    // disconnected rather than let a ghost block the ready-up gate.
+    for (const playerId of Object.keys(gameState.players)) {
+      if (gameState.players[playerId]?.connected === false) {
+        cancelSeatRemoval(socket.data.roomCode as string, playerId);
+        delete gameState.players[playerId];
+      }
+    }
+
     for (const playerId of Object.keys(gameState.players)) {
       const player = gameState.players[playerId];
       if (!player) continue;
@@ -1581,7 +1818,7 @@ const handleConnection = (socket: Socket) => {
 
     // Fresh game back in the lobby — start the log over with the reset notice.
     gameState.gameLog = [];
-    logEvent(gameState, 'system', `${nameOf(gameState, socket.id)} reset the game.`, { id: socket.id, username: gameState.players[socket.id]?.username });
+    logEvent(gameState, 'system', `${nameOf(gameState, pid)} reset the game.`, { id: pid, username: gameState.players[pid]?.username });
 
     sendRoomUpdate();
   });
@@ -1593,13 +1830,15 @@ const handleConnection = (socket: Socket) => {
   socket.on('setUsername', (username) => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (gameState) {
-      const player = gameState.players[socket.id];
+      const player = gameState.players[pid];
       if (player) {
         player.username = username;
       } else {
-        gameState.players[socket.id] = {
-          id: socket.id,
+        gameState.players[pid] = {
+          id: pid,
           username: username,
+          ready: false,
+          connected: true,
           actionPoints: 3,
           partyLeaderId: undefined,
           slainMonsters: [],
@@ -1620,81 +1859,41 @@ const handleConnection = (socket: Socket) => {
     const gameState = getRoomState(roomCode);
     if (!gameState) return;
 
-    const wasLobbyLeader = socket.id === gameState.lobbyLeaderId;
+    // A newer socket already took this seat over — nothing to release.
+    if (socketIdForPlayer(roomCode, pid) !== socket.id) return;
+    unregisterPlayerSocket(roomCode, pid, socket.id);
 
-    const disconnectPending = pendingChallenges.get(roomCode);
-    if (disconnectPending) {
-      if (disconnectPending.pendingPlayerId === socket.id) {
-        gameState.discardPile.push(disconnectPending.pendingCardInstance);
-        pendingChallenges.delete(roomCode);
-        delete gameState.pendingChallenge;
-      } else if (disconnectPending.eligibleChallengerIds.includes(socket.id)) {
-        disconnectPending.passedPlayerIds.add(socket.id);
-        const remaining = disconnectPending.eligibleChallengerIds.filter(id => !disconnectPending.passedPlayerIds.has(id));
-        if (remaining.length === 0 && !disconnectPending.challengerId) {
-          executePendingCardPlay(roomCode, disconnectPending, gameState);
-          pendingChallenges.delete(roomCode);
-          delete gameState.pendingChallenge;
-        } else {
-          const gsPending = gameState.pendingChallenge;
-          if (gsPending) gsPending.eligibleChallengerIds = remaining;
-        }
-      }
+    const player = gameState.players[pid];
+    if (!player) return;
+
+    const wasActivePlayer = gameState.activePlayerId === pid;
+    player.connected = false;
+
+    // Anything the game is waiting on from them resolves as a pass right away.
+    resolveDeparture(roomCode, gameState, pid);
+
+    // Leadership must stay with someone who can actually click things.
+    if (gameState.lobbyLeaderId === pid) {
+      gameState.lobbyLeaderId = nextConnectedAfter(gameState, pid) ?? gameState.lobbyLeaderId;
     }
 
-    const modPhase = modifierPhases.get(roomCode);
-    if (modPhase) {
-      if (modPhase.rollingPlayerId === socket.id) {
-        modifierPhases.delete(roomCode);
-        delete gameState.modifierPhase;
-      } else if (modPhase.allOpponentsWithModifiers.includes(socket.id)) {
-        modPhase.allOpponentsWithModifiers = modPhase.allOpponentsWithModifiers.filter(id => id !== socket.id);
-        modPhase.opponentQueue = modPhase.opponentQueue.filter(id => id !== socket.id);
-        if (modPhase.phase === 'opponent_turn' && modPhase.opponentQueue.length === 0) {
-          if (modPhase.cardPlayedThisCycle) {
-            const newQueue = modPhase.allOpponentsWithModifiers.filter(
-              pid => gameState.players[pid]?.zones.hand.some(c => c.cardType === 'modifier')
-            );
-            if (newQueue.length === 0) {
-              finalizeRoll(roomCode, modPhase, gameState, sendRoomUpdate);
-            } else {
-              modPhase.opponentQueue = newQueue;
-              modPhase.cardPlayedThisCycle = false;
-              updateModifierPhaseGameState(roomCode, modPhase, gameState);
-            }
-          } else {
-            finalizeRoll(roomCode, modPhase, gameState, sendRoomUpdate);
-          }
-        } else {
-          updateModifierPhaseGameState(roomCode, modPhase, gameState);
-        }
-      }
-    }
-
+    // Once a game is underway the seat survives a grace period for reconnects;
+    // in the lobby (or after game over) there is nothing worth holding.
+    const holdSeat = gameState.status !== 'waiting' && gameState.status !== 'finished';
     logGame(gameState, 'player_disconnected', {
-      username: gameState.players[socket.id]?.username,
-      wasActivePlayer: gameState.activePlayerId === socket.id,
-    }, socket.id);
+      username: player.username,
+      wasActivePlayer,
+      seatHeldMs: holdSeat ? SEAT_GRACE_MS : 0,
+    }, pid);
 
-    delete gameState.players[socket.id];
-
-    if (gameState.activePlayerId === socket.id) {
-      gameState.activePlayerId = Object.keys(gameState.players)[0] ?? '';
-    }
-
-    if (wasLobbyLeader) {
-      gameState.lobbyLeaderId = Object.keys(gameState.players)[0] ?? undefined;
-    }
-
-    const room = getIo().sockets.adapter.rooms.get(roomCode);
-    const roomCount = room?.size ?? 0;
-    if (roomCount === 0) {
-      void endGameSession(gameState, 'abandoned');
-      delete rooms[roomCode];
+    if (holdSeat) {
+      logEvent(gameState, 'system', `${nameOf(gameState, pid)} disconnected — holding their seat for ${Math.round(SEAT_GRACE_MS / 60000)} minutes.`, { id: pid, username: player.username });
+      scheduleSeatRemoval(roomCode, pid);
+      sendRoomUpdate();
       return;
     }
 
-    sendRoomUpdate();
+    removePlayerSeat(roomCode, gameState, pid, 'left');
   });
 };
 
