@@ -877,7 +877,9 @@ export default function Game() {
             {gameState?.modifierPhase && (() => {
               const mPhase = gameState.modifierPhase!;
               const isMyModifierTurn = mPhase.activePlayerId === myId;
-              const isFailing = mPhase.currentTotal < mPhase.requiredRoll;
+              const isFailing = mPhase.slayOnLow
+                ? mPhase.currentTotal > mPhase.requiredRoll
+                : mPhase.currentTotal < mPhase.requiredRoll;
               const rollingPlayer = gameState.players[mPhase.rollingPlayerId];
               const myModifiers = myPlayer?.zones.hand.filter(c => c.cardType === 'modifier') ?? [];
               return (
@@ -889,7 +891,7 @@ export default function Game() {
                       <strong>{mPhase.die1} + {mPhase.die2}</strong>
                       {mPhase.persistentBonus ? ` + ${mPhase.persistentBonus}` : ''}
                       {mPhase.accumulatedModifier ? (mPhase.accumulatedModifier >= 0 ? ` + ${mPhase.accumulatedModifier}` : ` - ${Math.abs(mPhase.accumulatedModifier)}`) : ''}{' '}
-                      = <strong>{mPhase.currentTotal}</strong> / need <strong>{mPhase.requiredRoll}</strong>
+                      = <strong>{mPhase.currentTotal}</strong> / need <strong>{mPhase.requiredRoll}{mPhase.slayOnLow ? ' or less' : ''}</strong>
                     </p>
                     <p style={{ marginTop: 0, marginBottom: '0.75rem' }}>
                       Currently{' '}
@@ -1043,7 +1045,7 @@ export default function Game() {
             <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: monsterAttackResult.slew ? '#d4edda' : '#fff3cd', border: `1px solid ${monsterAttackResult.slew ? '#28a745' : '#ffc107'}`, color: '#333' }}>
               <strong>{monsterAttackResult.slew ? 'Monster Slain!' : 'Attack Result'}</strong>{' '}
               {monsterAttackResult.attackerName} rolled <strong>{monsterAttackResult.roll}</strong> against{' '}
-              <strong>{monsterAttackResult.monsterName}</strong> (needed {monsterAttackResult.requiredRoll}).{' '}
+              <strong>{monsterAttackResult.monsterName}</strong> (needed {monsterAttackResult.requiredRoll}{monsterAttackResult.slayOnLow ? ' or less' : ''}).{' '}
               {monsterAttackResult.effectText}
             </div>
           )}

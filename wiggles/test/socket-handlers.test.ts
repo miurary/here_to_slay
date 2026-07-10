@@ -280,6 +280,46 @@ describe('attackMonster', () => {
     expect(failed[0]!.text).toMatch(/needed 10/);
   });
 
+  it('m_011 Dracos: a LOW roll reports success and slays (inverted condition)', () => {
+    const monster = makeMonster('m_011');
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')], actionPoints: 3 }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    dice.next = [2, 2]; // 4 ≤ 5 → slays
+    connect(h, 'p1').fire('attackMonster', monster.instanceId);
+    const roll = lastOf(h.socket('p1'), 'heroRollResult');
+    expect(roll.success).toBe(true);
+    expect(roll.requiredRoll).toBe(5);
+    expect(roll.message).toMatch(/5 or less/);
+    expect(gs.players['p1']!.slainMonsters.map(c => c.instanceId)).toContain(monster.instanceId);
+  });
+
+  it('m_011 Dracos: the roller gets a modifier window while the total is too HIGH', () => {
+    const monster = makeMonster('m_011');
+    const gs = buildGameState({
+      players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')], hand: [makeCard('mod_001')], actionPoints: 3 }), buildPlayer({ id: 'p2' })],
+      activeMonsters: [monster],
+    });
+    const h = createHarness(gs);
+    dice.next = [3, 3]; // 6 > 5 → not slaying yet; roller can play modifiers downward
+    connect(h, 'p1').fire('attackMonster', monster.instanceId);
+    expect(gs.modifierPhase?.phase).toBe('roller_turn');
+    expect(gs.modifierPhase?.requiredRoll).toBe(5);
+    expect(gs.modifierPhase?.slayOnLow).toBe(true);
+  });
+
+  it('m_011 Dracos: no roller modifier window when the low roll already slays', () => {
+    const monster = makeMonster('m_011');
+    const gs = buildGameState({
+      players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')], hand: [makeCard('mod_001')], actionPoints: 3 }), buildPlayer({ id: 'p2' })],
+      activeMonsters: [monster],
+    });
+    const h = createHarness(gs);
+    dice.next = [2, 2]; // 4 ≤ 5 → already slaying; no reason to prompt the roller
+    connect(h, 'p1').fire('attackMonster', monster.instanceId);
+    expect(gs.modifierPhase).toBeUndefined();
+    expect(gs.players['p1']!.slainMonsters).toHaveLength(1);
+  });
+
   it('records a chat message in the game log', () => {
     const gs = buildGameState({ players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
     const h = createHarness(gs);

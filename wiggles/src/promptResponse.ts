@@ -5,7 +5,7 @@ import type {
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
 import {
-  abilityPromptRequests, getRoomState, emitAbilityPrompt, emitAbilityResolution, buildPromptId,
+  abilityPromptRequests, getRoomState, emitAbilityPrompt, emitAbilityResolution, buildPromptId, pidOf,
 } from './state.js';
 import { getPlayerBySocketId, findHeroInPlayerParty, moveCardBetweenZones } from './util.js';
 import { drawCards } from './cards.js';
@@ -197,7 +197,7 @@ const handlePromptResponse = (
   const gameState = getRoomState(sourceSocket.data.roomCode as string);
   if (!gameState) return;
 
-  const player = getPlayerBySocketId(gameState, sourceSocket.id);
+  const player = getPlayerBySocketId(gameState, pidOf(sourceSocket));
   if (!player) return;
 
   const option = request.options.find((opt) => opt.id === selectedOptionId);
@@ -241,7 +241,7 @@ const handlePromptResponse = (
             label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
             payload: { cardInstanceId: c.instanceId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode,
             heroInstanceId: request.heroInstanceId,

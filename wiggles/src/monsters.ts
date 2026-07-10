@@ -51,6 +51,13 @@ const getMonsterAttackRollBonus = (gameState: GameState, player: Player): number
 // dynamically from player.slainMonsters at the point of use — no extra setup needed here.
 const applySlainEffect = () => {};
 
+// Most monsters slay on the upper bound ("roll 8+") with the penalty on the
+// lower ("roll 4−"), but some (m_011 Dracos) invert that: the SLAY sits on the
+// lower bound ("roll 5 or less") and the penalty on the upper. Which side slays
+// is read from the card data, never assumed.
+const monsterSlaysOnLow = (monsterTemplate: CardTemplate): boolean =>
+  (monsterTemplate.lowerBoundEffect ?? []).some((e: Effect) => e.action === 'SLAY');
+
 const promptMonsterDiscard = (
   socket: Socket<ClientToServerEvents, ServerToClientEvents>,
   gameState: GameState,
@@ -129,26 +136,33 @@ const applyMonsterAttackEffects = (
   const upperBound = monsterTemplate.upperBound ?? 99;
   const lowerBound = monsterTemplate.lowerBound ?? 0;
   const monsterName = monsterTemplate.name ?? monster.templateId;
+  const slayOnLow = monsterSlaysOnLow(monsterTemplate);
 
   let effects: Effect[] = [];
   let effectText = '';
 
+  // Bounds are inclusive, matching the card text: "8+" hits at 8, "4−" at 4.
   if (finalTotal >= upperBound) {
     effects = monsterTemplate.upperBoundEffect ?? [];
     effectText = monsterTemplate.upperBoundText ?? '';
-  } else if (finalTotal < lowerBound) {
+  } else if (finalTotal <= lowerBound) {
     effects = monsterTemplate.lowerBoundEffect ?? [];
     effectText = monsterTemplate.lowerBoundText ?? '';
   }
 
-  const slew = finalTotal >= upperBound;
+  // Slaying means the SLAY effect actually fired — which bound that is depends
+  // on the card (Dracos slays on a LOW roll).
+  const slew = effects.some(e => e.action === 'SLAY');
+  const slayTarget = slayOnLow ? lowerBound : upperBound;
+  const slayTargetText = slayOnLow ? `${lowerBound} or less` : `${upperBound}`;
 
   // Broadcast result immediately before any prompts
   getIo().to(roomCode).emit('monsterAttackResult', {
     attackerName: player.username ?? pidOf(socket),
     monsterName,
     roll: finalTotal,
-    requiredRoll: upperBound,
+    requiredRoll: slayTarget,
+    slayOnLow,
     slew,
     effectText: effectText || 'Nothing happens.',
   });
@@ -158,7 +172,7 @@ const applyMonsterAttackEffects = (
     'action',
     slew
       ? `${nameOf(gameState, player.id)} slew ${monsterName}! (rolled ${finalTotal})`
-      : `${nameOf(gameState, player.id)}'s attack on ${monsterName} failed (rolled ${finalTotal}, needed ${upperBound}).`,
+      : `${nameOf(gameState, player.id)}'s attack on ${monsterName} failed (rolled ${finalTotal}, needed ${slayTargetText}).`,
     { id: player.id, username: player.username },
   );
 
@@ -167,7 +181,8 @@ const applyMonsterAttackEffects = (
     finalTotal,
     upperBound,
     lowerBound,
-    outcome: slew ? 'slain' : finalTotal < lowerBound ? 'penalty' : 'miss',
+    slayOnLow,
+    outcome: slew ? 'slain' : effects.length > 0 ? 'penalty' : 'miss',
     effectText,
     effects: effects.map(e => e.action),
   }, player.id);
@@ -233,10 +248,14 @@ const executeMonsterAttackRoll = (
   const upperBound = monsterTemplate.upperBound ?? 99;
   const lowerBound = monsterTemplate.lowerBound ?? 0;
   const monsterName = monsterTemplate.name ?? monster.templateId;
+  const slayOnLow = monsterSlaysOnLow(monsterTemplate);
+  const slayTarget = slayOnLow ? lowerBound : upperBound;
 
   const opponentsWithModifiers = getOpponentsWithModifiers(gameState, pidOf(socket));
   const rollerHasModifiers = player.zones.hand.some(c => c.cardType === 'modifier');
-  const rollerNeedsPrompt = currentTotal < upperBound && rollerHasModifiers;
+  // The roller only needs a modifier window while the slay is not yet secured —
+  // for a slay-low monster that means the total is still too HIGH.
+  const rollerNeedsPrompt = (slayOnLow ? currentTotal > lowerBound : currentTotal < upperBound) && rollerHasModifiers;
 
   logGame(gameState, 'monster_attack_roll', {
     monsterTemplateId: monster.templateId,
@@ -244,13 +263,15 @@ const executeMonsterAttackRoll = (
     total: currentTotal,
     upperBound,
     lowerBound,
+    slayOnLow,
     contested: rollerNeedsPrompt || opponentsWithModifiers.length > 0,
   }, pidOf(socket));
 
-  const success = currentTotal >= upperBound;
-  const statusWord = success ? 'Hit!' : currentTotal < lowerBound ? 'Penalty!' : 'Miss.';
-  const message = `Attacked ${monsterName}: Rolled ${die1} + ${die2}${attackBonus ? ` + ${attackBonus}` : ''} = ${currentTotal}. ${statusWord} (need ${upperBound} to slay).`;
-  socket.emit('heroRollResult', { heroInstanceId: monster.instanceId, die1, die2, total: currentTotal, requiredRoll: upperBound, success, message });
+  const success = slayOnLow ? currentTotal <= lowerBound : currentTotal >= upperBound;
+  const penalty = slayOnLow ? currentTotal >= upperBound : currentTotal <= lowerBound;
+  const statusWord = success ? 'Hit!' : penalty ? 'Penalty!' : 'Miss.';
+  const message = `Attacked ${monsterName}: Rolled ${die1} + ${die2}${attackBonus ? ` + ${attackBonus}` : ''} = ${currentTotal}. ${statusWord} (need ${slayOnLow ? `${lowerBound} or less` : upperBound} to slay).`;
+  socket.emit('heroRollResult', { heroInstanceId: monster.instanceId, die1, die2, total: currentTotal, requiredRoll: slayTarget, success, message });
 
   if (!rollerNeedsPrompt && opponentsWithModifiers.length === 0) {
     applyMonsterAttackEffects(roomCode, socket, gameState, player, monster, monsterTemplate, currentTotal, sendRoomUpdate);
@@ -262,7 +283,8 @@ const executeMonsterAttackRoll = (
     die1, die2, rawDiceTotal,
     persistentBonus: attackBonus,
     accumulatedModifier: 0,
-    requiredRoll: upperBound,
+    requiredRoll: slayTarget,
+    slayOnLow,
     rollContext: 'ATTACK_MONSTER',
     rollType: 'monster_attack',
     heroInstanceId: monster.instanceId,

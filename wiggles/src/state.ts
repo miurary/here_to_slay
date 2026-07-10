@@ -86,6 +86,9 @@ interface ModifierPhaseState {
   modifiersPlayed: Array<{ playerName: string; cardName: string; amount: number; choiceLabel: string }>;
   monsterInstanceId?: string;
   lowerBound?: number;
+  /** True when the slay condition is "roll N or LESS" (m_011 Dracos): requiredRoll
+      is then the lower bound and the roll succeeds at or under it. */
+  slayOnLow?: boolean;
 }
 const modifierPhases = new Map<string, ModifierPhaseState>();
 

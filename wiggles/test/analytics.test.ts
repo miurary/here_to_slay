@@ -318,8 +318,8 @@ describe('analytics event stream', () => {
     await flushAnalytics();
 
     expect(s3.puts).toHaveLength(1);
-    // Bug files are named by room code (the harness room is ROOM).
-    expect(s3.puts[0]!.Key).toMatch(/^bugs\/.*ROOM.*\.json$/);
+    // Bug files are named by room code.
+    expect(s3.puts[0]!.Key).toMatch(new RegExp(`^bugs/.*${h.roomCode}.*\\.json$`));
     expect(s3.puts[0]!.Body.toString()).toContain('lag spike');
     // Local copy removed after upload.
     expect(readdirSync(path.join(dir, 'bugs'))).toHaveLength(0);

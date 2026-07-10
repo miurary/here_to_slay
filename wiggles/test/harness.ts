@@ -16,6 +16,7 @@ import {
   collectedDiscards,
   rooms,
   playerSocketIds,
+  registerPlayerSocket,
   seatRemovalTimers,
 } from '../src/state.js';
 import { loadAllCardTemplates } from '../src/cards.js';
@@ -161,13 +162,18 @@ export interface FakeIo {
   to(room: string): { emit(event: string, ...args: unknown[]): void };
 }
 
-const makeSocket = (id: string, roomCode: string): FakeSocket => {
+// Like production, a socket's connection id is NOT the player id: players are
+// keyed by the persistent playerId sent in the handshake, while socket.id is a
+// random per-connection string. Keeping them distinct in tests catches any
+// engine code that wrongly uses socket.id as a player key.
+let _sockSeq = 0;
+const makeSocket = (playerId: string, roomCode: string): FakeSocket => {
   const emitted: EmittedEvent[] = [];
   const handlers = new Map<string, (...args: unknown[]) => void>();
   return {
-    id,
-    data: { roomCode, playerId: id },
-    handshake: { auth: { roomCode, username: id } },
+    id: `sock:${playerId}:${++_sockSeq}`,
+    data: { roomCode, playerId },
+    handshake: { auth: { roomCode, username: playerId, playerId } },
     emitted,
     disconnected: false,
     handlers,
@@ -177,7 +183,7 @@ const makeSocket = (id: string, roomCode: string): FakeSocket => {
     on(event, cb) { handlers.set(event, cb); },
     fire(event, ...args) {
       const cb = handlers.get(event);
-      if (!cb) throw new Error(`socket ${id} has no handler for '${event}'`);
+      if (!cb) throw new Error(`socket ${playerId} has no handler for '${event}'`);
       cb(...args);
     },
     prompts() {
@@ -186,7 +192,7 @@ const makeSocket = (id: string, roomCode: string): FakeSocket => {
     lastPrompt() {
       const ps = this.prompts();
       const last = ps[ps.length - 1];
-      if (!last) throw new Error(`socket ${id} received no abilityPrompt`);
+      if (!last) throw new Error(`socket ${playerId} received no abilityPrompt`);
       return last;
     },
     emittedOf(event) { return emitted.filter(e => e.event === event); },
@@ -210,41 +216,59 @@ export interface Harness {
 /**
  * Build a fake io, register a socket per player, install it via setIo(), and
  * register the room in the shared rooms map (so getRoomState works).
+ *
+ * Mirrors production identity wiring: io.sockets.sockets is keyed by the
+ * (random) socket id, and each seeded player's seat is bound to its socket via
+ * registerPlayerSocket — engine code must resolve players through pidOf /
+ * the seat registry, never through socket.id. The room code defaults to
+ * gameState.gameId because production sets gameId = roomCode.
  */
-export const createHarness = (gameState: GameState, roomCode = 'ROOM'): Harness => {
-  const socketMap = new Map<string, FakeSocket>();
-  for (const id of Object.keys(gameState.players)) socketMap.set(id, makeSocket(id, roomCode));
+export const createHarness = (gameState: GameState, roomCode?: string): Harness => {
+  const room = roomCode ?? gameState.gameId;
+  // Keyed by the creation name (player id for seeded players) so tests can say
+  // h.socket('p1') — distinct from the io map below, which is keyed by socket.id.
+  const byName = new Map<string, FakeSocket>();
+  const bySocketId = new Map<string, FakeSocket>();
+  const register = (name: string): FakeSocket => {
+    const s = makeSocket(name, room);
+    byName.set(name, s);
+    bySocketId.set(s.id, s);
+    return s;
+  };
+  for (const id of Object.keys(gameState.players)) {
+    const s = register(id);
+    registerPlayerSocket(room, id, s.id); // bind the seat like handleConnection does
+  }
 
   const broadcasts: FakeIo['broadcasts'] = [];
-  const adapterRooms = new Map<string, { size: number }>([[roomCode, { size: socketMap.size }]]);
+  const adapterRooms = new Map<string, { size: number }>([[room, { size: bySocketId.size }]]);
   const io: FakeIo = {
-    sockets: { sockets: socketMap, adapter: { rooms: adapterRooms } },
+    sockets: { sockets: bySocketId, adapter: { rooms: adapterRooms } },
     broadcasts,
     to(room) { return { emit(event, ...args) { broadcasts.push({ room, event, args }); } }; },
   };
   setIo(io as unknown as Parameters<typeof setIo>[0]);
-  rooms[roomCode] = gameState;
+  rooms[room] = gameState;
 
   let updates = 0;
   const sendRoomUpdate = () => { updates += 1; };
 
   return {
     io,
-    roomCode,
+    roomCode: room,
     socket(id) {
-      const s = socketMap.get(id);
+      const s = byName.get(id);
       if (!s) throw new Error(`no fake socket for player ${id}`);
       return s;
     },
+    // No seat binding here: a fresh join binds its seat when handleConnection runs.
     addSocket(id) {
-      const s = makeSocket(id, roomCode);
-      socketMap.set(id, s);
-      return s;
+      return register(id);
     },
     sendRoomUpdate,
     roomUpdateCount: () => updates,
     promptById(promptId) {
-      for (const s of socketMap.values()) {
+      for (const s of byName.values()) {
         const found = s.prompts().find(p => p.promptId === promptId);
         if (found) return found;
       }

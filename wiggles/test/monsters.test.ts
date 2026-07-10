@@ -60,7 +60,7 @@ describe('monster attack — special hit bonuses & inverted monster', () => {
     const monster = makeMonster('m_011');
     const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
     const h = createHarness(gs);
-    attack(h, gs, 'p1', monster, 4); // < lowerBound 5 → SLAY
+    attack(h, gs, 'p1', monster, 5); // "roll 5 or less" → exactly 5 slays
     expect(gs.players['p1']!.slainMonsters.map(c => c.instanceId)).toContain(monster.instanceId);
   });
 
@@ -72,6 +72,73 @@ describe('monster attack — special hit bonuses & inverted monster', () => {
     expect(gs.players['p1']!.slainMonsters).toHaveLength(0);
     expect(gs.activeMonsters).toHaveLength(1);
     expect(gs.players['p1']!.zones.hand).toHaveLength(1);
+  });
+});
+
+// Regression guards: bounds are INCLUSIVE ("8+" hits at 8, "4−" at 4) and the
+// slain/failed outcome is read from which effect actually fired, not from
+// which bound was crossed (m_011 Dracos slays on a LOW roll).
+describe('monster attack — inclusive bounds & inverted slay (regression)', () => {
+  const lastAttackBroadcast = (h: Harness) => {
+    const bs = h.io.broadcasts.filter(b => b.event === 'monsterAttackResult');
+    return bs[bs.length - 1]!.args[0] as { slew: boolean; requiredRoll: number; slayOnLow?: boolean; effectText: string };
+  };
+
+  it('m_001 Doombringer: rolling exactly the lower bound (4) triggers the penalty', () => {
+    const monster = makeMonster('m_001');
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', hand: [makeCard('s_001'), makeCard('s_002')] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    attack(h, gs, 'p1', monster, 4); // card says "4−": 4 counts
+    expect(gs.players['p1']!.zones.hand).toHaveLength(0);
+    expect(gs.discardPile).toHaveLength(2);
+  });
+
+  it('m_002 Mega Slime: rolling exactly 7 forces the sacrifice — there is no neutral gap', () => {
+    const monster = makeMonster('m_002'); // slay 8+, penalty 7−
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    attack(h, gs, 'p1', monster, 7);
+    expect(h.socket('p1').lastPrompt().message).toMatch(/Sacrifice 1 Hero/);
+  });
+
+  it('m_011 Dracos: a slaying LOW roll broadcasts slew=true with the "5 or less" target', () => {
+    const monster = makeMonster('m_011');
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    attack(h, gs, 'p1', monster, 5);
+    expect(gs.players['p1']!.slainMonsters).toHaveLength(1);
+    const result = lastAttackBroadcast(h);
+    expect(result.slew).toBe(true);
+    expect(result.requiredRoll).toBe(5);
+    expect(result.slayOnLow).toBe(true);
+  });
+
+  it('m_011 Dracos: a HIGH roll is the penalty — broadcast says slew=false and the chosen hero is sacrificed', () => {
+    const monster = makeMonster('m_011');
+    const hero = makeCard('h_043');
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [hero] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    attack(h, gs, 'p1', monster, 9); // ≥ upperBound 8 → SACRIFICE, not a slay
+    expect(lastAttackBroadcast(h).slew).toBe(false);
+    expect(gs.players['p1']!.slainMonsters).toHaveLength(0);
+    expect(gs.activeMonsters).toHaveLength(1); // Dracos survives
+
+    // The sacrifice prompt resolves: the hero leaves the party for the discard pile.
+    expect(h.socket('p1').lastPrompt().promptType).toBe('selectCard');
+    respond(h, 'p1', hero.instanceId);
+    expect(gs.players['p1']!.zones.party).toHaveLength(0);
+    expect(gs.discardPile.map(c => c.instanceId)).toContain(hero.instanceId);
+  });
+
+  it('m_011 Dracos: a middling roll (6–7) does nothing', () => {
+    const monster = makeMonster('m_011');
+    const gs = buildGameState({ players: [buildPlayer({ id: 'p1', party: [makeCard('h_043')] }), buildPlayer({ id: 'p2' })], activeMonsters: [monster] });
+    const h = createHarness(gs);
+    attack(h, gs, 'p1', monster, 7);
+    expect(gs.players['p1']!.slainMonsters).toHaveLength(0);
+    expect(gs.activeMonsters).toHaveLength(1);
+    expect(gs.players['p1']!.zones.party).toHaveLength(1);
+    expect(h.socket('p1').prompts()).toHaveLength(0);
   });
 });
 

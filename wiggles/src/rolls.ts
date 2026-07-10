@@ -134,6 +134,7 @@ const updateModifierPhaseGameState = (_roomCode: string, phase: ModifierPhaseSta
     modifiersPlayed: phase.modifiersPlayed,
     ...(monsterName !== undefined ? { monsterName } : {}),
     ...(phase.lowerBound !== undefined ? { lowerBound: phase.lowerBound } : {}),
+    ...(phase.slayOnLow !== undefined ? { slayOnLow: phase.slayOnLow } : {}),
   };
 };
 
@@ -153,7 +154,7 @@ const finalizeRoll = (
     accumulatedModifier: phase.accumulatedModifier,
     finalTotal,
     requiredRoll: phase.requiredRoll,
-    success: finalTotal >= phase.requiredRoll,
+    success: phase.slayOnLow ? finalTotal <= phase.requiredRoll : finalTotal >= phase.requiredRoll,
     modifiersPlayed: phase.modifiersPlayed,
     ...(phase.monsterInstanceId ? { monsterInstanceId: phase.monsterInstanceId } : {}),
   }, phase.rollingPlayerId);

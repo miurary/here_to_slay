@@ -4,7 +4,7 @@ import type {
   CardInstance, Effect, GameState, Player,
 } from '../../shared/src/types.js';
 import type { Socket } from 'socket.io';
-import { emitAbilityPrompt, buildPromptId } from './state.js';
+import { emitAbilityPrompt, buildPromptId, pidOf } from './state.js';
 import { endGameSession } from './analytics.js';
 
 
@@ -112,11 +112,11 @@ const promptForPlayerSelection = (
     payload: { playerId },
   }));
 
-  emitAbilityPrompt(sourceSocket.id, {
+  emitAbilityPrompt(pidOf(sourceSocket), {
     promptId: buildPromptId(),
     roomCode: sourceSocket.data.roomCode as string,
     heroInstanceId,
-    sourcePlayerId: sourceSocket.id,
+    sourcePlayerId: pidOf(sourceSocket),
     promptType: 'selectPlayer',
     message,
     options,
@@ -140,11 +140,11 @@ const promptForCardSelection = (
     payload: { cardInstanceId: card.instanceId },
   }));
 
-  emitAbilityPrompt(sourceSocket.id, {
+  emitAbilityPrompt(pidOf(sourceSocket), {
     promptId: buildPromptId(),
     roomCode: sourceSocket.data.roomCode as string,
     heroInstanceId,
-    sourcePlayerId: sourceSocket.id,
+    sourcePlayerId: pidOf(sourceSocket),
     promptType: 'selectCard',
     message,
     options,

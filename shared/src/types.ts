@@ -64,6 +64,9 @@ export interface ModifierPhaseInfo {
   rollType: 'hero_ability' | 'monster_attack';
   monsterName?: string;
   lowerBound?: number;
+  /** True when the slay condition is "roll N or LESS" (m_011 Dracos): requiredRoll
+      is the lower bound and the roll succeeds at or under it. */
+  slayOnLow?: boolean;
   modifiersPlayed: Array<{ playerName: string; cardName: string; amount: number; choiceLabel: string }>;
 }
 
@@ -71,7 +74,10 @@ export interface MonsterAttackResultData {
   attackerName: string;
   monsterName: string;
   roll: number;
+  /** The slay threshold: minimum roll normally, or maximum roll when slayOnLow. */
   requiredRoll: number;
+  /** True when this monster slays on "requiredRoll or less" (m_011 Dracos). */
+  slayOnLow?: boolean;
   slew: boolean;
   effectText: string;
 }

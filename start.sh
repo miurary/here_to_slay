@@ -3,56 +3,32 @@ set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
 AWS_REGION="us-west-2"
-ECS_CLUSTER="wiggles-cluster"
-ECS_SERVICE="wiggles-task-service-xh5xjwiw"
-ECS_DEFAULT_COUNT=1                              # fallback if no state file
-CLOUDFRONT_DISTRIBUTION_ID="EEESGFDKI1CIE"
-# NOTE: This deployment uses public subnets + an Internet Gateway (no NAT
-# gateway), so there is no NAT recreate step. The only WAF WebACL is
-# CloudFront-scoped, so enabling CloudFront below restores it; the ALB has no
-# WebACL, so there is no WAF associate step.
+LIGHTSAIL_INSTANCE="wiggles"          # <-- your Lightsail instance name
 # ─────────────────────────────────────────────────────────────────────────────
 
-STATE_FILE=".service-state.json"
+# Reverses stop.sh. The static IP stays attached across stop/start, so the
+# Route 53 record still points here — no DNS change needed. Docker is enabled at
+# boot and the containers use `restart: unless-stopped`, so caddy + wiggles come
+# back on their own once the instance is up (give them ~30s after "running").
 
-# ── Read saved state ──────────────────────────────────────────────────────────
-if [[ -f "$STATE_FILE" ]]; then
-  DESIRED=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['ecs_desired_count'])")
-else
-  echo "No state file found — using default desired count of $ECS_DEFAULT_COUNT."
-  DESIRED=$ECS_DEFAULT_COUNT
-fi
-
-# ── 1. Enable CloudFront distribution ────────────────────────────────────────
-echo "==> Enabling CloudFront distribution $CLOUDFRONT_DISTRIBUTION_ID..."
-CF_ETAG=$(aws cloudfront get-distribution-config \
-  --id "$CLOUDFRONT_DISTRIBUTION_ID" \
-  --query 'ETag' --output text)
-aws cloudfront get-distribution-config \
-  --id "$CLOUDFRONT_DISTRIBUTION_ID" \
-  --query 'DistributionConfig' \
-  | python3 -c "import json,sys; cfg=json.load(sys.stdin); cfg['Enabled']=True; print(json.dumps(cfg))" \
-  > /tmp/cf-config-start.json
-aws cloudfront update-distribution \
-  --id "$CLOUDFRONT_DISTRIBUTION_ID" \
-  --distribution-config file:///tmp/cf-config-start.json \
-  --if-match "$CF_ETAG" \
-  --output text --query 'Distribution.Id'
-echo "    CloudFront enable initiated — takes 15-20 min to fully propagate."
-
-# ── 2. Scale ECS back up ──────────────────────────────────────────────────────
-echo "==> Scaling ECS service to $DESIRED task(s)..."
-aws ecs update-service \
+echo "==> Starting Lightsail instance '$LIGHTSAIL_INSTANCE'..."
+aws lightsail start-instance \
   --region "$AWS_REGION" \
-  --cluster "$ECS_CLUSTER" \
-  --service "$ECS_SERVICE" \
-  --desired-count "$DESIRED" \
-  --output text --query 'service.serviceName'
+  --instance-name "$LIGHTSAIL_INSTANCE" \
+  --query 'operations[0].status' --output text
 
-# ── Clean up state file ───────────────────────────────────────────────────────
-rm -f "$STATE_FILE"
+echo "==> Waiting for the instance to reach 'running'..."
+for _ in $(seq 1 60); do
+  STATE=$(aws lightsail get-instance-state \
+    --region "$AWS_REGION" \
+    --instance-name "$LIGHTSAIL_INSTANCE" \
+    --query 'state.name' --output text 2>/dev/null || echo "unknown")
+  if [[ "$STATE" == "running" ]]; then
+    echo "==> Instance is running. Containers will be back within ~30s."
+    exit 0
+  fi
+  sleep 5
+done
 
-echo ""
-echo "==> Done. Services are coming back up:"
-echo "    [x] CloudFront distribution enabled (15-20 min to propagate)"
-echo "    [x] ECS service scaling to $DESIRED task(s)"
+echo "==> Instance did not report 'running' within the timeout — check the Lightsail console." >&2
+exit 1

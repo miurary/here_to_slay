@@ -6,7 +6,7 @@ import type {
 import type { Socket } from 'socket.io';
 import {
   emitAbilityPrompt, emitAbilityResolution, buildPromptId, getSocketByPlayerId,
-  abilityPromptRequests, markHeroPlayedFromAbility, collectedDiscards,
+  abilityPromptRequests, markHeroPlayedFromAbility, collectedDiscards, pidOf,
 } from './state.js';
 import type { AbilityPromptOption } from './state.js';
 import { drawCards } from './cards.js';
@@ -280,7 +280,7 @@ const processHeroAbilityEffects = (
 
         if (targetReq?.eligibility === 'opponent') {
           const allCandidates: Array<{ card: CardInstance; ownerId: string }> = [];
-          for (const opId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
+          for (const opId of getOpponentPlayerIds(gameState, pidOf(sourceSocket))) {
             const opp = gameState.players[opId];
             if (!opp) continue;
             // h_034 Calming Voice — party heroes of that player cannot be stolen.
@@ -298,11 +298,11 @@ const processHeroAbilityEffects = (
             label: `${gameState.cardTemplates[card.templateId]?.name || card.templateId} (${gameState.players[ownerId]?.username || 'opponent'})`,
             payload: { cardInstanceId: card.instanceId, playerId: ownerId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: 'Choose a card.',
             options: opponentOptions,
@@ -372,7 +372,7 @@ const processHeroAbilityEffects = (
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: (effect.casterId as string | undefined) ?? sourceSocket.id,
+              sourcePlayerId: (effect.casterId as string | undefined) ?? pidOf(sourceSocket),
               promptType: 'discardCard',
               message: `Discard ${remainingCount} more card${remainingCount === 1 ? '' : 's'}.`,
               options: moreOptions,
@@ -389,15 +389,15 @@ const processHeroAbilityEffects = (
             payload: { cardInstanceId: card.instanceId },
           }));
           if (selfOptions.length === 0) { effectResult = 'No cards to discard.'; aborted = true; break; }
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'discardCard',
             message: `Discard ${effect.amount ?? 1} card${(effect.amount ?? 1) === 1 ? '' : 's'}.`,
             options: selfOptions,
-            effect: { ...effect, casterId: sourceSocket.id },
+            effect: { ...effect, casterId: pidOf(sourceSocket) },
             remainingEffects: remainingAfterThis,
           });
           promptCreated = true;
@@ -407,10 +407,10 @@ const processHeroAbilityEffects = (
           // h_025 Beary Wise: collect the discarded cards so the caster can take one.
           const collectKey = effect.collectThenTake === true ? buildPromptId() : undefined;
           const emittedEffect: Effect = collectKey
-            ? { ...effect, casterId: sourceSocket.id, collectKey }
-            : { ...effect, casterId: sourceSocket.id };
+            ? { ...effect, casterId: pidOf(sourceSocket), collectKey }
+            : { ...effect, casterId: pidOf(sourceSocket) };
           let discardPrompted = 0;
-          for (const opponentId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
+          for (const opponentId of getOpponentPlayerIds(gameState, pidOf(sourceSocket))) {
             const opponentSocket = getSocketByPlayerId(gameState.gameId, opponentId);
             if (!opponentSocket) continue;
             const opponent = gameState.players[opponentId];
@@ -440,7 +440,7 @@ const processHeroAbilityEffects = (
               promptId,
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'discardCard',
               message: `Discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`,
               options,
@@ -453,13 +453,13 @@ const processHeroAbilityEffects = (
               promptType: 'discardCard',
               message: `Discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`,
               options,
-              requesterId: sourceSocket.id,
+              requesterId: pidOf(sourceSocket),
             });
             discardPrompted++;
           }
           if (collectKey && discardPrompted > 0) {
             collectedDiscards.set(collectKey, {
-              casterId: sourceSocket.id,
+              casterId: pidOf(sourceSocket),
               heroInstanceId: hero.instanceId,
               roomCode: sourceSocket.data.roomCode as string,
               remaining: discardPrompted,
@@ -488,11 +488,11 @@ const processHeroAbilityEffects = (
               promptId,
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'discardCard',
               message: `Discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`,
               options,
-              effect: { ...effect, casterId: sourceSocket.id },
+              effect: { ...effect, casterId: pidOf(sourceSocket) },
               remainingEffects: [],
             });
             targetSocket.emit('abilityPrompt', {
@@ -501,11 +501,11 @@ const processHeroAbilityEffects = (
               promptType: 'discardCard',
               message: `Discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`,
               options,
-              requesterId: sourceSocket.id,
+              requesterId: pidOf(sourceSocket),
             });
             return `Prompting ${targetPlayer.username || 'Player'} to discard ${effect.amount ?? 1} card${(effect.amount === 1) ? '' : 's'}.`;
           }
-          const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, sourceSocket.id));
+          const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, pidOf(sourceSocket)));
           if (eligiblePlayers.length === 0) return 'No eligible players available.';
           promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player for this effect.', remainingAfterThis);
           promptCreated = true;
@@ -552,7 +552,7 @@ const processHeroAbilityEffects = (
           // 'all_players' (h_017 Grim Pupper / h_058 Brawling Spirit) includes the caster.
           const sacrificeIds = effect.target === 'all_players'
             ? Object.keys(gameState.players)
-            : getOpponentPlayerIds(gameState, sourceSocket.id);
+            : getOpponentPlayerIds(gameState, pidOf(sourceSocket));
           const sacMessage = effect.cardType === 'hero'
             ? 'Sacrifice a Hero card from your party.'
             : 'Sacrifice a card from your party.';
@@ -586,11 +586,11 @@ const processHeroAbilityEffects = (
               promptId,
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'discardCard',
               message: sacMessage,
               options,
-              effect: { ...effect, casterId: sourceSocket.id },
+              effect: { ...effect, casterId: pidOf(sourceSocket) },
               remainingEffects: [],
             });
             targetSocket2.emit('abilityPrompt', {
@@ -599,7 +599,7 @@ const processHeroAbilityEffects = (
               promptType: 'discardCard',
               message: sacMessage,
               options,
-              requesterId: sourceSocket.id,
+              requesterId: pidOf(sourceSocket),
             });
           }
           return 'Prompting players to sacrifice a card.';
@@ -624,11 +624,11 @@ const processHeroAbilityEffects = (
               promptId,
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'discardCard',
               message: `Sacrifice a ${effect.cardType ?? ''} card from your party.`.replace('  ', ' '),
               options,
-              effect: { ...effect, casterId: sourceSocket.id },
+              effect: { ...effect, casterId: pidOf(sourceSocket) },
               remainingEffects: [],
             });
             sacTargetSocket.emit('abilityPrompt', {
@@ -637,11 +637,11 @@ const processHeroAbilityEffects = (
               promptType: 'discardCard',
               message: `Sacrifice a ${effect.cardType ?? ''} card from your party.`.replace('  ', ' '),
               options,
-              requesterId: sourceSocket.id,
+              requesterId: pidOf(sourceSocket),
             });
             return `Prompting ${sacTarget.username || 'player'} to sacrifice.`;
           }
-          const sacEligible = getOpponentPlayerIds(gameState, sourceSocket.id)
+          const sacEligible = getOpponentPlayerIds(gameState, pidOf(sourceSocket))
             .filter(id => (gameState.players[id]?.zones.party ?? []).some(c =>
               c.cardType !== 'party_leader' && (!effect.cardType || c.cardType === effect.cardType)
             ));
@@ -672,7 +672,7 @@ const processHeroAbilityEffects = (
           if (gameState.activeMonsters.length < 3 && gameState.monsterDeck.length > 0) {
             gameState.activeMonsters.push(...(drawCards(gameState.monsterDeck, 1) as MonsterInstance[]));
           }
-          applyWinIfMet(gameState, player, sourceSocket.id);
+          applyWinIfMet(gameState, player, pidOf(sourceSocket));
           effectResult = `Slew ${gameState.cardTemplates[slain.templateId]?.name || 'monster'}!`;
           break;
         }
@@ -683,11 +683,11 @@ const processHeroAbilityEffects = (
             label: gameState.cardTemplates[m.templateId]?.name || m.templateId,
             payload: { cardInstanceId: m.instanceId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: 'Choose a monster to SLAY.',
             options: slayOptions,
@@ -728,14 +728,14 @@ const processHeroAbilityEffects = (
           const cardNames = targetPlayer.zones.hand.map((card: CardInstance) => gameState.cardTemplates[card.templateId]?.name || card.templateId);
           return `${targetPlayer.username || 'Player'} has: ${cardNames.join(', ') || 'no cards'}.`;
         }
-        const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, sourceSocket.id));
+        const eligiblePlayers = Object.keys(gameState.players).filter((id) => isOpponent(id, pidOf(sourceSocket)));
         promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, eligiblePlayers, 'Choose a player whose hand to view.', remainingAfterThis);
         promptCreated = true;
         break;
       }
       case 'STEAL_RANDOM_CARD': {
         if (effect.target === 'all_opponents') {
-          const opponents = getOpponentPlayerIds(gameState, sourceSocket.id).filter((playerId) => {
+          const opponents = getOpponentPlayerIds(gameState, pidOf(sourceSocket)).filter((playerId) => {
             if (!effect.condition) return true;
             const opponent = gameState.players[playerId];
             if (!opponent) return false;
@@ -795,11 +795,11 @@ const processHeroAbilityEffects = (
               label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
               payload: { cardInstanceId: c.instanceId },
             }));
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'selectCard',
               message: `Equip ${selectedName} to which hero?`,
               options: equipOptions,
@@ -812,7 +812,7 @@ const processHeroAbilityEffects = (
           const [card] = player.zones.hand.splice(index, 1);
           if (!card) { effectResult = 'Failed to play card from hand.'; break; }
           player.zones.party.push(card);
-          applyWinIfMet(gameState, player, sourceSocket.id);
+          applyWinIfMet(gameState, player, pidOf(sourceSocket));
           const roomCode = sourceSocket.data.roomCode as string;
           markHeroPlayedFromAbility(roomCode, card.instanceId);
           sourceSocket.emit('heroPlayedFromAbility', card.instanceId);
@@ -859,7 +859,7 @@ const processHeroAbilityEffects = (
         break;
       }
       case 'FORCE_END_TURN': {
-        gameState.forceEndTurn = sourceSocket.id;
+        gameState.forceEndTurn = pidOf(sourceSocket);
         effectResult = 'Ending turn.';
         break;
       }
@@ -888,11 +888,11 @@ const processHeroAbilityEffects = (
           ) {
             const target = owner.zones.party.find(c => c.instanceId === heroId);
             const targetName = target ? gameState.cardTemplates[target.templateId]?.name ?? 'that Hero' : 'that Hero';
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'confirm',
               message: `Corrupted Sabretooth: STEAL ${targetName} instead of destroying it?`,
               options: [
@@ -910,7 +910,7 @@ const processHeroAbilityEffects = (
         }
         const destroyOptions: AbilityPromptOption[] = [];
         for (const [opId, opp] of Object.entries(gameState.players)) {
-          if (opId === sourceSocket.id) continue;
+          if (opId === pidOf(sourceSocket)) continue;
           // m_014 Terratuga / h_032 Mighty Blade — protected heroes are not targets.
           if (playerHasSlainEffectFlag(gameState, opp, 'blockHeroDestruction')) continue;
           if (playerHasTempFlag(opp, 'blockHeroDestruction')) continue;
@@ -925,11 +925,11 @@ const processHeroAbilityEffects = (
           }
         }
         if (destroyOptions.length === 0) { effectResult = 'No opponent heroes to destroy.'; aborted = true; break; }
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'selectCard',
           message: 'Choose a Hero to DESTROY.',
           options: destroyOptions,
@@ -948,7 +948,7 @@ const processHeroAbilityEffects = (
           const stolen = owner ? moveCardBetweenZones(owner.zones.party, player.zones.party, heroId) : undefined;
           if (stolen) {
             if (stolen.equippedItem && owner) moveCardBetweenZones(owner.zones.party, player.zones.party, stolen.equippedItem);
-            applyWinIfMet(gameState, player, sourceSocket.id);
+            applyWinIfMet(gameState, player, pidOf(sourceSocket));
             effectResult = `Stole ${gameState.cardTemplates[stolen.templateId]?.name || 'hero'}.`;
           } else effectResult = 'Hero not found.';
         } else {
@@ -965,7 +965,7 @@ const processHeroAbilityEffects = (
           if (stolen.equippedItem) moveCardBetweenZones(opponent.zones.party, player.zones.party, stolen.equippedItem);
           const stolenName = gameState.cardTemplates[stolen.templateId]?.name || 'hero';
           let msg = `Stole ${stolenName} from ${opponent.username || 'opponent'}.`;
-          applyWinIfMet(gameState, player, sourceSocket.id);
+          applyWinIfMet(gameState, player, pidOf(sourceSocket));
           // h_041 Tipsy Tootie: this hero joins the robbed player's party.
           if (effect.giveSelfAfter === true) {
             const moved = moveCardBetweenZones(player.zones.party, opponent.zones.party, hero.instanceId);
@@ -1006,7 +1006,7 @@ const processHeroAbilityEffects = (
         }
         const stealOptions: AbilityPromptOption[] = [];
         for (const [opId, opp] of Object.entries(gameState.players)) {
-          if (opId === sourceSocket.id) continue;
+          if (opId === pidOf(sourceSocket)) continue;
           // h_034 Calming Voice — that player's heroes cannot be stolen.
           if (playerHasTempFlag(opp, 'blockSteal')) continue;
           for (const card of opp.zones.party) {
@@ -1020,11 +1020,11 @@ const processHeroAbilityEffects = (
           }
         }
         if (stealOptions.length === 0) { effectResult = 'No opponent heroes to steal.'; aborted = true; break; }
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'selectCard',
           message: 'Choose a Hero to STEAL.',
           options: stealOptions,
@@ -1063,11 +1063,11 @@ const processHeroAbilityEffects = (
           const match = mayPlayType ? pulled.find(c => c.cardType === mayPlayType) : undefined;
           if (match) {
             const matchName = gameState.cardTemplates[match.templateId]?.name || match.templateId;
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'confirm',
               message: `You pulled ${matchName} — play it immediately?`,
               options: [
@@ -1088,15 +1088,15 @@ const processHeroAbilityEffects = (
               label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
               payload: { cardInstanceId: c.instanceId },
             }));
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'discardCard',
               message: 'Discard one of the pulled cards.',
               options: discardOpts,
-              effect: { action: 'PROMPT_DISCARD', target: 'self', amount: 1, casterId: sourceSocket.id },
+              effect: { action: 'PROMPT_DISCARD', target: 'self', amount: 1, casterId: pidOf(sourceSocket) },
               remainingEffects: [],
             });
             promptCreated = true;
@@ -1109,7 +1109,7 @@ const processHeroAbilityEffects = (
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'confirm',
               message: 'Plundering Puma pulled 2 of your cards — draw a card?',
               options: [
@@ -1123,7 +1123,7 @@ const processHeroAbilityEffects = (
           effectResult = msg;
           break;
         }
-        const pullEligible = getOpponentPlayerIds(gameState, sourceSocket.id)
+        const pullEligible = getOpponentPlayerIds(gameState, pidOf(sourceSocket))
           .filter(id => (gameState.players[id]?.zones.hand.length ?? 0) > 0);
         if (pullEligible.length === 0) { effectResult = 'No opponents have cards to pull.'; aborted = true; break; }
         promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, pullEligible, 'Choose a player to pull from.', remainingAfterThis);
@@ -1148,11 +1148,11 @@ const processHeroAbilityEffects = (
           const takenName = gameState.cardTemplates[taken.templateId]?.name || taken.templateId;
           // h_019 Hollow Husk: may play the taken Magic card immediately.
           if (effect.mayPlay === true && taken.cardType === 'magic') {
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'confirm',
               message: `You took ${takenName} — play it immediately?`,
               options: [
@@ -1172,7 +1172,7 @@ const processHeroAbilityEffects = (
         // h_059 Gruesome Gladiator: choose a card from EACH opponent's hand.
         if (effect.target === 'all_opponents') {
           let prompted = 0;
-          for (const opId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
+          for (const opId of getOpponentPlayerIds(gameState, pidOf(sourceSocket))) {
             const opp = gameState.players[opId];
             if (!opp || opp.zones.hand.length === 0) continue;
             const handOptions = opp.zones.hand.map(c => ({
@@ -1180,11 +1180,11 @@ const processHeroAbilityEffects = (
               label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
               payload: { cardInstanceId: c.instanceId, playerId: opId },
             }));
-            emitAbilityPrompt(sourceSocket.id, {
+            emitAbilityPrompt(pidOf(sourceSocket), {
               promptId: buildPromptId(),
               roomCode: sourceSocket.data.roomCode as string,
               heroInstanceId: hero.instanceId,
-              sourcePlayerId: sourceSocket.id,
+              sourcePlayerId: pidOf(sourceSocket),
               promptType: 'selectCard',
               message: `${opp.username || 'Opponent'}'s hand — choose a card to take.`,
               options: handOptions,
@@ -1217,11 +1217,11 @@ const processHeroAbilityEffects = (
             label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
             payload: { cardInstanceId: c.instanceId, playerId: target.id },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: `${target.username || 'Player'}'s hand: ${handNames}. Choose a card to take.`,
             options: takeOptions,
@@ -1231,7 +1231,7 @@ const processHeroAbilityEffects = (
           promptCreated = true;
           break;
         }
-        const lookEligible = getOpponentPlayerIds(gameState, sourceSocket.id)
+        const lookEligible = getOpponentPlayerIds(gameState, pidOf(sourceSocket))
           .filter(id => (gameState.players[id]?.zones.hand.length ?? 0) > 0);
         if (lookEligible.length === 0) { effectResult = 'No opponents have cards.'; aborted = true; break; }
         promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, lookEligible, 'Choose a player whose hand to look at.', remainingAfterThis);
@@ -1277,11 +1277,11 @@ const processHeroAbilityEffects = (
             label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
             payload: { cardInstanceId: c.instanceId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: `Equip ${playName} to which hero?`,
             options: equipOptions,
@@ -1342,11 +1342,11 @@ const processHeroAbilityEffects = (
         const thenAction = effect.then as string | undefined;
         if (thenAction === 'DESTROY_HERO') {
           // h_023 Pan Chucks: may reveal the drawn Challenge card to destroy a hero.
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'confirm',
             message: `You drew ${matchedNames}! Reveal it to DESTROY a Hero card?`,
             options: [
@@ -1368,11 +1368,11 @@ const processHeroAbilityEffects = (
           payload: { cardInstanceId: c.instanceId },
         }));
         playOptions.push({ id: 'skip', label: 'Keep in hand', payload: { confirm: false } });
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'selectCard',
           message: `You drew ${matchedNames} — play one immediately?`,
           options: playOptions,
@@ -1399,11 +1399,11 @@ const processHeroAbilityEffects = (
           label: `${gameState.cardTemplates[c.templateId]?.name || c.templateId} (${c.cardType})`,
           payload: { cardInstanceId: c.instanceId },
         }));
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'selectCard',
           message: 'Top of the deck — choose a card to add to your hand.',
           options: peekOptions,
@@ -1428,11 +1428,11 @@ const processHeroAbilityEffects = (
             label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
             payload: { cardInstanceId: c.instanceId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: 'Choose which card goes ON TOP of the deck.',
             options: orderOptions,
@@ -1503,11 +1503,11 @@ const processHeroAbilityEffects = (
           label: cls.charAt(0).toUpperCase() + cls.slice(1),
           payload: { classId: cls },
         }));
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'selectCard',
           message: 'Choose a Class — every Hero card of that Class returns to its owner\'s hand.',
           options: classOptions,
@@ -1527,7 +1527,7 @@ const processHeroAbilityEffects = (
           effectResult = `Traded hands with ${tradeTarget.username || 'player'}.`;
           break;
         }
-        const tradeEligible = getOpponentPlayerIds(gameState, sourceSocket.id);
+        const tradeEligible = getOpponentPlayerIds(gameState, pidOf(sourceSocket));
         if (tradeEligible.length === 0) { effectResult = 'No players to trade with.'; aborted = true; break; }
         promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, tradeEligible, 'Choose a player to trade hands with.', remainingAfterThis);
         promptCreated = true;
@@ -1536,7 +1536,7 @@ const processHeroAbilityEffects = (
       case 'GIVE_CARD': {
         if (responsePayload?.cardInstanceId) {
           // The responder gives their chosen card to the caster.
-          const giveCasterId = (effect.casterId as string | undefined) ?? sourceSocket.id;
+          const giveCasterId = (effect.casterId as string | undefined) ?? pidOf(sourceSocket);
           const giveCaster = gameState.players[giveCasterId];
           if (!giveCaster) { effectResult = 'Caster not found.'; break; }
           const given = moveCardBetweenZones(player.zones.hand, giveCaster.zones.hand, responsePayload.cardInstanceId);
@@ -1546,7 +1546,7 @@ const processHeroAbilityEffects = (
           break;
         }
         let givePrompted = 0;
-        for (const opId of getOpponentPlayerIds(gameState, sourceSocket.id)) {
+        for (const opId of getOpponentPlayerIds(gameState, pidOf(sourceSocket))) {
           const opp = gameState.players[opId];
           if (!opp || opp.zones.hand.length === 0) continue;
           const giveOptions = opp.zones.hand.map(c => ({
@@ -1558,11 +1558,11 @@ const processHeroAbilityEffects = (
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: `Choose a card to give to ${player.username || 'the caster'}.`,
             options: giveOptions,
-            effect: { action: 'GIVE_CARD', casterId: sourceSocket.id },
+            effect: { action: 'GIVE_CARD', casterId: pidOf(sourceSocket) },
             remainingEffects: [],
           });
           givePrompted++;
@@ -1587,18 +1587,18 @@ const processHeroAbilityEffects = (
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: `${player.username || 'A player'} asks for a card — give one, or decline?`,
             options: askOptions,
-            effect: { action: 'GIVE_OR_RECOVER_RESPOND', casterId: sourceSocket.id, recoverAmount: effect.recoverAmount ?? 2 },
+            effect: { action: 'GIVE_OR_RECOVER_RESPOND', casterId: pidOf(sourceSocket), recoverAmount: effect.recoverAmount ?? 2 },
             remainingEffects: [],
           });
           promptCreated = true;
           effectResult = `Waiting for ${askTarget.username || 'player'}…`;
           break;
         }
-        const askEligible = getOpponentPlayerIds(gameState, sourceSocket.id);
+        const askEligible = getOpponentPlayerIds(gameState, pidOf(sourceSocket));
         if (askEligible.length === 0) { effectResult = 'No players to choose.'; aborted = true; break; }
         promptForPlayerSelection(sourceSocket, gameState, hero.instanceId, effect, askEligible, 'Choose a player.', remainingAfterThis);
         promptCreated = true;
@@ -1668,11 +1668,11 @@ const processHeroAbilityEffects = (
             label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
             payload: { cardInstanceId: c.instanceId },
           }));
-          emitAbilityPrompt(sourceSocket.id, {
+          emitAbilityPrompt(pidOf(sourceSocket), {
             promptId: buildPromptId(),
             roomCode: sourceSocket.data.roomCode as string,
             heroInstanceId: hero.instanceId,
-            sourcePlayerId: sourceSocket.id,
+            sourcePlayerId: pidOf(sourceSocket),
             promptType: 'selectCard',
             message: `Equip ${recName} to which hero?`,
             options: recEquipOptions,
@@ -1706,11 +1706,11 @@ const processHeroAbilityEffects = (
           label: gameState.cardTemplates[c.templateId]?.name || c.templateId,
           payload: { cardInstanceId: c.instanceId },
         }));
-        emitAbilityPrompt(sourceSocket.id, {
+        emitAbilityPrompt(pidOf(sourceSocket), {
           promptId: buildPromptId(),
           roomCode: sourceSocket.data.roomCode as string,
           heroInstanceId: hero.instanceId,
-          sourcePlayerId: sourceSocket.id,
+          sourcePlayerId: pidOf(sourceSocket),
           promptType: 'multiSelectCard',
           message: `Select up to ${chainMax} card${chainMax === 1 ? '' : 's'} to ${chainVerb} — each lets you DESTROY a Hero card.`,
           options: chainOptions,
@@ -1843,7 +1843,7 @@ const activateHeroAbility = (
   heroInstanceId: string,
   sendRoomUpdate: () => void
 ) => {
-  const player = getPlayerBySocketId(gameState, sourceSocket.id);
+  const player = getPlayerBySocketId(gameState, pidOf(sourceSocket));
   if (!player) {
     sourceSocket.emit('actionFailed', 'Player not found.');
     return;
@@ -1861,7 +1861,7 @@ const activateHeroAbility = (
     return;
   }
 
-  logGame(gameState, 'hero_ability_activated', { heroTemplateId: hero.templateId }, sourceSocket.id);
+  logGame(gameState, 'hero_ability_activated', { heroTemplateId: hero.templateId }, pidOf(sourceSocket));
 
   // Handle costs (SACRIFICE / DISCARD) before processing effects
   const costs = template.activeSkill.costs ?? [];
@@ -1886,7 +1886,7 @@ const activateHeroAbility = (
       promptId,
       roomCode: sourceSocket.data.roomCode as string,
       heroInstanceId,
-      sourcePlayerId: sourceSocket.id,
+      sourcePlayerId: pidOf(sourceSocket),
       promptType: 'discardCard',
       message: `Discard ${label} from your hand.`,
       options: discardOptions,
@@ -1899,7 +1899,7 @@ const activateHeroAbility = (
       promptType: 'discardCard',
       message: `Discard ${label} from your hand.`,
       options: discardOptions,
-      requesterId: sourceSocket.id,
+      requesterId: pidOf(sourceSocket),
     });
     return;
   }
@@ -1925,7 +1925,7 @@ const activateHeroAbility = (
       promptId,
       roomCode: sourceSocket.data.roomCode as string,
       heroInstanceId,
-      sourcePlayerId: sourceSocket.id,
+      sourcePlayerId: pidOf(sourceSocket),
       promptType: 'discardCard',
       message: `Choose ${sacLabel} to sacrifice.`,
       options: sacrificeOptions,
@@ -1938,7 +1938,7 @@ const activateHeroAbility = (
       promptType: 'discardCard',
       message: `Choose ${sacLabel} to sacrifice.`,
       options: sacrificeOptions,
-      requesterId: sourceSocket.id,
+      requesterId: pidOf(sourceSocket),
     });
     return;
   }
@@ -1952,7 +1952,7 @@ const activateHeroAbility = (
   // Check if a prompt was just emitted (waiting for user input)
   // If so, don't call emitAbilityResolution yet; let handlePromptResponse handle it
   const pendingPrompts = Array.from(abilityPromptRequests.values()).filter(
-    (req) => req.heroInstanceId === heroInstanceId && req.sourcePlayerId === sourceSocket.id
+    (req) => req.heroInstanceId === heroInstanceId && req.sourcePlayerId === pidOf(sourceSocket)
   );
 
   if (pendingPrompts.length === 0) {
