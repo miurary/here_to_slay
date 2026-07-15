@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import UsernameCard from './components/home/UsernameCard';
-import CreateNewRoomCard from './components/home/CreateNewRoomCard';
-import JoinExistingRoomCard from './components/home/JoinExistingRoomCard';
+import PregameShell from './components/pregame/PregameShell';
+import HomePanel from './components/pregame/HomePanel';
 import './App.css';
 
 export default function Home() {
@@ -10,20 +9,12 @@ export default function Home() {
   const location = useLocation();
   const storedName = localStorage.getItem('username') ?? '';
   const [name, setName] = useState(storedName);
-  const [nameSaved, setNameSaved] = useState(Boolean(storedName));
   const [roomCode, setRoomCode] = useState('');
   const [status, setStatus] = useState<string>((location.state as { error?: string } | null)?.error ?? '');
 
-  const handleSaveName = () => {
+  const saveName = () => {
     const trimmed = name.trim();
-    if (!trimmed) {
-      setStatus('Enter a username before creating a room.');
-      return;
-    }
-
-    localStorage.setItem('username', trimmed);
-    setNameSaved(true);
-    setStatus(`Welcome ${trimmed}! Your username is set.`);
+    if (trimmed) localStorage.setItem('username', trimmed);
   };
 
   const handleCreateRoom = async () => {
@@ -32,57 +23,45 @@ export default function Home() {
       setStatus('Please enter a username first.');
       return;
     }
-
     localStorage.setItem('username', trimmedName);
-    setNameSaved(true);
     setStatus('Creating room...');
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/create-room`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' },
       });
       const data = await response.json();
-
       if (!response.ok || !data.roomCode) {
         setStatus('Failed to create room.');
         return;
       }
-
       navigate(`/game/${data.roomCode}`);
     } catch {
       setStatus('Unable to connect to the game server.');
     }
   };
 
-  const handleJoinRoom = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleJoinRoom = async () => {
     const trimmedRoom = roomCode.trim().toUpperCase();
     if (!trimmedRoom) {
       setStatus('Enter a room code to join.');
       return;
     }
-
     if (!name.trim()) {
       setStatus('Please enter a username before joining.');
       return;
     }
-
     localStorage.setItem('username', name.trim());
-    setNameSaved(true);
     setStatus('Joining room...');
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/room/${trimmedRoom}`);
       const data = await response.json();
-
       if (!response.ok || !data.exists) {
         setStatus(`Room ${trimmedRoom} not found.`);
         return;
       }
-
       navigate(`/game/${trimmedRoom}`);
     } catch {
       setStatus('Unable to connect to the game server.');
@@ -90,29 +69,21 @@ export default function Home() {
   };
 
   return (
-    <div className="appShell">
-      <div className="appPage">
-        <div style={{ maxWidth: '720px', margin: '0 auto' }}>
-          <h1>Here to Slay Online</h1>
-          <p>Start or join a room, then share the link with friends.</p>
-          <UsernameCard
-            nameSaved={nameSaved}
-            name={name}
-            setName={setName}
-            handleSaveName={handleSaveName}
-          />
-
-          <CreateNewRoomCard handleCreateRoom={handleCreateRoom} />
-
-          <JoinExistingRoomCard roomCode={roomCode} setRoomCode={setRoomCode} handleJoinRoom={handleJoinRoom}/>
-
-          {status && (
-            <div style={{ marginTop: '1rem', color: '#b9bfc9' }}>
-              {status}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <PregameShell
+      showRoomChrome={false}
+      statusMain="WELCOME"
+      statusSub={status || 'set your name, then create or join a room'}
+      statusGold={false}
+    >
+      <HomePanel
+        name={name}
+        onNameChange={setName}
+        onNameSave={saveName}
+        onCreateRoom={handleCreateRoom}
+        joinCode={roomCode}
+        onJoinChange={setRoomCode}
+        onJoinRoom={handleJoinRoom}
+      />
+    </PregameShell>
   );
 }

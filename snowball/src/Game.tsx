@@ -5,17 +5,16 @@ import type { AbilityPrompt, ChallengeResolvedData, ClientToServerEvents, Server
 import { setActiveSocket } from './utils/socketRef';
 import './App.css';
 
-import FirstRollCard from './components/game/FirstRollCard';
-import PartyLeaderSelectionCard from './components/game/PartyLeaderSelectionCard';
-import PartyLeaderReviewCard from './components/game/PartyLeaderReviewCard';
-import RollCompleteCard from './components/game/RollCompleteCard';
-import ChatLogPanel from './components/game/ChatLogPanel';
 import GameTable from './components/game/table/GameTable';
+import PregameShell from './components/pregame/PregameShell';
+import PregameLogDrawer from './components/pregame/PregameLogDrawer';
+import Lobby from './components/pregame/Lobby';
+import RollForFirst from './components/pregame/RollForFirst';
+import LeaderSelection from './components/pregame/LeaderSelection';
+import LeaderReview from './components/pregame/LeaderReview';
 import { getPlayerId } from './utils/playerId';
 
 const MAX_PLAYERS = 6;
-// Fixed lobby avatar palette, assigned by join order.
-const AVATAR_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0891b2'];
 
 export default function Game() {
   const { roomCode: rawRoomCode } = useParams();
@@ -30,9 +29,9 @@ export default function Game() {
   const MIN_ROLL_ANIMATION_MS = 2000;
   // How long the dice take to settle onto their faces once the tumble stops.
   const ROLL_SETTLE_MS = 900;
-  // Keeps FirstRollCard mounted through my tumble + settle, even after the
-  // server has already moved the room to roll_complete (the last roller would
-  // otherwise never see their animation).
+  // Keeps the roll strip in its "rolling" state through my tumble + settle, even
+  // after the server has already moved the room to roll_complete (the last roller
+  // would otherwise never see their animation).
   const [rollAnimActive, setRollAnimActive] = useState(false);
   const [myRoll, setMyRoll] = useState<number | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -66,10 +65,13 @@ export default function Game() {
   const [selectedTargetOpponentId, setSelectedTargetOpponentId] = useState<string | null>(null);
   const [challengeResult, setChallengeResult] = useState<ChallengeResolvedData | null>(null);
   const [monsterAttackResult, setMonsterAttackResult] = useState<MonsterAttackResultData | null>(null);
-  const [status, setStatus] = useState<string>(!roomCode ? 'Missing room code.' : 'Connecting...');
+  // The connection status string still drives the socket handlers' logging; the
+  // pre-game UI derives its own labels from GameState, so the value is unused here.
+  const [, setStatus] = useState<string>(!roomCode ? 'Missing room code.' : 'Connecting...');
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
-  const [inviteCopied, setInviteCopied] = useState(false);
+  // Transient felt toast for pre-game actions (e.g. "Invite link copied").
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     rollAnimationTimerRef.current = rollAnimationTimer;
@@ -289,15 +291,25 @@ export default function Game() {
     socket?.emit('toggleReady');
   };
 
+  const showToast = (text: string) => {
+    setToast(text);
+    setTimeout(() => setToast((t) => (t === text ? null : t)), 3500);
+  };
+
   const handleCopyInvite = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      setInviteCopied(true);
-      setTimeout(() => setInviteCopied(false), 2000);
+      showToast('Invite link copied to clipboard');
     } catch {
-      setActionMessage('Could not copy the invite link — copy the page URL instead.');
-      setTimeout(() => setActionMessage(null), 3000);
+      showToast('Could not copy the invite link — copy the page URL instead.');
     }
+  };
+
+  // Re-save the name to the server on Enter/blur from the header field (name
+  // changes already sync via the effect above; this is the explicit commit).
+  const handleNameSave = () => {
+    const trimmed = name.trim();
+    if (trimmed) socket?.emit('setUsername', trimmed);
   };
 
   const handleRoll = () => {
@@ -542,18 +554,6 @@ export default function Game() {
     socket?.emit('usePartyLeaderAbility');
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setStatus('Please enter a username');
-      return;
-    }
-    localStorage.setItem('username', trimmed);
-    setStatus(`Username set to ${trimmed}`);
-    socket?.emit('setUsername', trimmed);
-  };
-
   if (!roomCode) {
     return (
       <div className="appShell">
@@ -655,170 +655,88 @@ export default function Game() {
       />
     );
   }
+  // ── Pre-game (home is a separate route): lobby → roll → leader flows. ─────
+  const gs = gameState;
+  const phase = gs?.status;
+  const pname = (id?: string) => (id && gs?.players[id]?.username) || 'Player';
+  const rollResultView = phase === 'roll_complete' && !rollAnimActive;
 
-  // ── Pre-game lobby / roll-off / party-leader flows (unchanged layout). ────
-  return (
-    <div className="gameShell">
-      <div className="gameGrid">
-        {/* Row 1 — header: room code + username + back */}
-        <header className="gameHeader">
-          <div className="gameHeaderLeft">
-            <h1>Room {roomCode}</h1>
-            <p>Status: <strong>{status}</strong></p>
-            <button
-              type="button"
-              onClick={handleCopyInvite}
-              className="buttonPrimary"
-              style={{ padding: '6px 12px', fontSize: '0.8rem', alignSelf: 'flex-start', ...(inviteCopied ? { background: '#16a34a' } : {}) }}
-            >
-              {inviteCopied ? '✓ Link copied!' : '🔗 Copy invite link'}
-            </button>
-          </div>
-          <form className="gameHeaderUsername" onSubmit={handleSubmit}>
-            <input
-              id="username"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Username"
-              className="usernameInput"
-            />
-            <button type="submit" className="primaryButton">Save</button>
-          </form>
-          <button type="button" onClick={() => navigate('/')} className="primaryButton gameHeaderBack">
-            Back to Home
-          </button>
-        </header>
+  let statusMain = 'CONNECTING';
+  let statusSub = '';
+  let statusGold = false;
+  if (!gs) {
+    statusSub = 'joining the room…';
+  } else if (phase === 'waiting') {
+    statusMain = `WAITING FOR PLAYERS · ${players.length}/${MAX_PLAYERS}`;
+    statusSub = players.length >= 2 ? 'ready when you are' : 'need at least 2 players to start';
+    statusGold = players.length >= 2;
+  } else if (phase === 'rolling' || phase === 'roll_complete') {
+    if (rollResultView) {
+      statusMain = 'FIRST PLAYER DECIDED';
+    } else {
+      statusMain = 'ROLL FOR FIRST PLAYER';
+      statusSub = 'highest total goes first';
+      statusGold = gs.currentRollerId === myId;
+    }
+  } else if (phase === 'party_leader_selection') {
+    statusMain = 'PARTY LEADER SELECTION';
+    const mine = gs.currentSelectionPlayerId === myId;
+    statusSub = mine ? 'your pick' : `${pname(gs.currentSelectionPlayerId)} is picking…`;
+    statusGold = mine;
+  } else if (phase === 'party_leader_review') {
+    statusMain = 'LEADERS CHOSEN';
+    statusSub = 'review the table, then deal';
+    statusGold = gs.lobbyLeaderId === myId;
+  } else if (phase === 'finished') {
+    statusMain = 'GAME OVER';
+  }
 
-        {/* Row 2 — centered status / info panel */}
-        <div className="gameStatusRow">
-          {actionMessage && !leaderModalOpen && <div className="bannerError">{actionMessage}</div>}
-        </div>
-
-        {/* Row 3 — pre-game board: players list · center flow · chat */}
-        <div className="gameBoardPre">
-          <div className="boardPreGrid">
-            <aside className="boardPreLeft">
-              <div className="panel" style={{ padding: '1rem' }}>
-                <h3>Players ({players.length}/{MAX_PLAYERS})</h3>
-                <div style={{ display: 'grid', gap: '0.5rem' }}>
-                  {players.map((player, index) => {
-                    const isLeader = player.id === gameState?.lobbyLeaderId;
-                    const isMe = player.id === myId;
-                    const isAway = player.connected === false;
-                    const displayName = player.username || player.id;
-                    return (
-                      <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: `1px solid ${isMe ? 'oklch(0.55 0.06 85)' : 'oklch(0.34 0.015 260)'}`, backgroundColor: isMe ? 'oklch(0.28 0.02 85)' : 'oklch(0.24 0.015 260)', opacity: isAway ? 0.55 : 1 }}>
-                        <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length], color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
-                          {displayName.charAt(0).toUpperCase()}
-                        </div>
-                        <span style={{ fontWeight: isMe ? 700 : 400, color: '#e8e9ee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {displayName}{isMe ? ' (you)' : ''}
-                        </span>
-                        {isLeader && <span title="Lobby leader">👑</span>}
-                        {isAway ? (
-                          <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: '#ffd9a8', backgroundColor: 'oklch(0.32 0.07 70)' }}>
-                            Reconnecting…
-                          </span>
-                        ) : gameState?.status === 'waiting' && !isLeader && (
-                          <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '0.75rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', color: player.ready ? 'oklch(0.85 0.11 150)' : '#9aa0ad', backgroundColor: player.ready ? 'oklch(0.32 0.07 150)' : 'oklch(0.3 0.015 260)' }}>
-                            {player.ready ? '✓ Ready' : 'Not ready'}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {gameState?.status === 'waiting' && Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, i) => (
-                    <div key={`empty-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem', borderRadius: '8px', border: '1px dashed oklch(0.38 0.015 260)', color: '#8f96a3' }}>
-                      <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: '50%', border: '1px dashed oklch(0.38 0.015 260)', boxSizing: 'border-box' }} />
-                      <span style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for a player…</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
-
-            <div className="boardPreInner">
-            {gameState?.status === 'finished' && (() => {
-              const winnerId = gameState.winnerId;
-              const winner = winnerId ? gameState.players[winnerId] : undefined;
-              return (
-                <div style={{ padding: '2rem', borderRadius: '14px', backgroundColor: 'oklch(0.26 0.05 150)', border: '1px solid oklch(0.6 0.11 150)', textAlign: 'center' }}>
-                  <div style={{ fontFamily: '"Alegreya", Georgia, serif', fontSize: '2rem', marginBottom: '0.5rem', color: 'oklch(0.85 0.11 150)' }}>Game Over!</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                    {winner ? `${winner.username ?? winnerId} wins!` : 'Game over!'}
-                  </div>
-                  <div style={{ marginTop: '0.5rem', color: '#b9bfc9' }}>
-                    {winner && `${winner.slainMonsters.length} monster${winner.slainMonsters.length !== 1 ? 's' : ''} slain.`}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {gameState?.status === 'waiting' && (() => {
-              const leaderId = gameState.lobbyLeaderId;
-              const leaderName = (leaderId ? gameState.players[leaderId]?.username : undefined) ?? 'the lobby leader';
-              const amReady = !!players.find(p => p.id === myId)?.ready;
-              // The leader starts the game, so only everyone else readies up.
-              const everyoneReady = players.every(p => p.id === leaderId || p.ready);
-              const canStart = players.length >= 2 && everyoneReady;
-              const startHint = players.length < 2
-                ? 'Need at least 2 players to start.'
-                : everyoneReady ? null : 'Waiting for everyone to ready up…';
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  {leaderId === myId ? (
-                    <>
-                      <button type="button" onClick={handleStart} disabled={!canStart} className="buttonPrimary">
-                        Start Game
-                      </button>
-                      {startHint && <span style={{ color: '#9aa0ad', fontSize: '0.9rem' }}>{startHint}</span>}
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleToggleReady}
-                        className="buttonPrimary"
-                        style={amReady ? { background: '#16a34a', boxShadow: '0 14px 30px rgba(22, 163, 74, 0.18)' } : undefined}
-                      >
-                        {amReady ? '✓ Ready' : 'Ready up'}
-                      </button>
-                      <span style={{ color: '#9aa0ad', fontSize: '0.9rem' }}>
-                        {amReady ? `Waiting for ${leaderName} to start the game…` : `Let ${leaderName} know you are ready to play.`}
-                      </span>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
-
-            {(gameState?.status === 'rolling' || (gameState?.status === 'roll_complete' && rollAnimActive)) && (
-              <FirstRollCard gameState={gameState} myId={myId} handleRoll={handleRoll} isRolling={isRolling} myRoll={myRoll} />
-            )}
-
-            {gameState?.status === 'roll_complete' && !rollAnimActive && (
-              <RollCompleteCard gameState={gameState} myId={myId} handleContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
-            )}
-
-            {gameState?.status === 'party_leader_selection' && (
-              <PartyLeaderSelectionCard gameState={gameState} myId={myId} handleChoosePartyLeader={handleChoosePartyLeader} />
-            )}
-
-            {gameState?.status === 'party_leader_review' && (
-              <PartyLeaderReviewCard gameState={gameState} myId={myId} handleContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
-            )}
-
-            </div>
-
-            <aside className="boardPreRight">
-              {gameState && (
-                <ChatLogPanel gameState={gameState} entries={gameState.gameLog ?? []} myId={myId} onSend={handleSendChat} />
-              )}
-            </aside>
-          </div>
-        </div>
+  let content: React.ReactNode;
+  if (!gs) {
+    content = <div style={{ color: '#9aa0ad', fontSize: 14 }}>Connecting…</div>;
+  } else if (phase === 'waiting') {
+    content = (
+      <Lobby gameState={gs} myId={myId} players={players} roomCode={roomCode} onCopyInvite={handleCopyInvite} onStart={handleStart} onToggleReady={handleToggleReady} />
+    );
+  } else if (phase === 'rolling' || (phase === 'roll_complete' && rollAnimActive)) {
+    content = (
+      <RollForFirst gameState={gs} myId={myId} status="rolling" isRolling={isRolling} myRoll={myRoll} onRoll={handleRoll} onContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
+    );
+  } else if (phase === 'roll_complete') {
+    content = (
+      <RollForFirst gameState={gs} myId={myId} status="roll_complete" isRolling={isRolling} myRoll={myRoll} onRoll={handleRoll} onContinue={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />
+    );
+  } else if (phase === 'party_leader_selection') {
+    content = <LeaderSelection gameState={gs} myId={myId} onChoose={handleChoosePartyLeader} />;
+  } else if (phase === 'party_leader_review') {
+    content = <LeaderReview gameState={gs} myId={myId} onBegin={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />;
+  } else if (phase === 'finished') {
+    const winner = gs.winnerId ? gs.players[gs.winnerId] : undefined;
+    content = (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, textAlign: 'center' }}>
+        <span style={{ fontFamily: '"Alegreya", Georgia, serif', fontWeight: 800, fontSize: 40, color: 'oklch(0.82 0.1 85)' }}>Game over</span>
+        <span style={{ fontSize: 16, fontWeight: 700 }}>{winner ? `${winner.username ?? 'A player'} wins!` : 'The game has ended.'}</span>
+        {winner && <span style={{ fontSize: 12, color: '#b9bfc9' }}>{winner.slainMonsters.length} monster{winner.slainMonsters.length !== 1 ? 's' : ''} slain.</span>}
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <PregameShell
+      showRoomChrome
+      roomCode={roomCode}
+      onCopyInvite={handleCopyInvite}
+      name={name}
+      onNameChange={setName}
+      onNameSave={handleNameSave}
+      onLeave={() => navigate('/')}
+      statusMain={statusMain}
+      statusSub={statusSub}
+      statusGold={statusGold}
+      toast={toast}
+      logDrawer={gs ? <PregameLogDrawer myId={myId} entries={gs.gameLog ?? []} onSend={handleSendChat} /> : undefined}
+    >
+      {content}
+    </PregameShell>
   );
 }

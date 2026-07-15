@@ -1,7 +1,9 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   Shared dark "poker-table" theme for the home screen, lobby, and pre-game
-   flows. Palette + fonts match the in-game GameTable (see components/game/table).
-   Fonts (Alegreya / Instrument Sans) are loaded in index.html.
+   Global dark "poker-table" theme shared by the home screen, pre-game shell,
+   and game screen. Layout for those screens now lives in the PregameShell /
+   GameTable components; this file only holds global element styling and the
+   handful of utility classes still used outside them.
+   Palette + fonts match components/game/table. Fonts loaded in index.html.
    ───────────────────────────────────────────────────────────────────────── */
 :root {
   color: #e8e9ee;
@@ -14,150 +16,6 @@ body {
   min-height: 100vh;
   background: oklch(0.22 0.015 260);
   color: #e8e9ee;
-}
-
-.appShell {
-  min-height: 100vh;
-  padding: 24px 20px 32px;
-  background: oklch(0.22 0.015 260);
-}
-
-.appPage {
-  max-width: 1800px;
-  margin: 0 auto;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.panel {
-  background: oklch(0.26 0.015 260);
-  border: 1px solid oklch(0.34 0.015 260);
-  border-radius: 16px;
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
-  padding: 24px;
-  color: #e8e9ee;
-}
-
-/* Accent panels get a colored top edge instead of a light tint. */
-.panelAccentBlue {
-  border-color: oklch(0.55 0.12 250);
-  border-top: 3px solid oklch(0.75 0.12 250);
-}
-.panelAccentGreen {
-  border-color: oklch(0.5 0.11 150);
-  border-top: 3px solid oklch(0.75 0.11 150);
-}
-.panelAccentPurple {
-  border-color: oklch(0.5 0.12 300);
-  border-top: 3px solid oklch(0.66 0.13 300);
-}
-
-.statusPanel {
-  background: oklch(0.24 0.015 260);
-  border-color: oklch(0.34 0.015 260);
-}
-
-.panelHand {
-  background: oklch(0.26 0.015 260);
-  padding: 20px;
-}
-
-.panelParty {
-  width: 100%;
-  height: 100%;
-  padding: 20px;
-  border-color: oklch(0.34 0.015 260);
-  box-sizing: border-box;
-  overflow: auto;
-}
-
-.boardTopRow {
-  margin-bottom: 24px;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.mainContent {
-  flex: 1;
-  min-width: 0;
-}
-
-.sidebar {
-  width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex-shrink: 0;
-}
-
-.card {
-  border: 1px solid oklch(0.36 0.015 260);
-  border-radius: 12px;
-  padding: 6px;
-  width: fit-content;
-  background: oklch(0.24 0.015 260);
-  text-align: center;
-  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
-  cursor: pointer;
-}
-
-.card:hover {
-  background: oklch(0.28 0.015 260);
-}
-
-.cardSelected {
-  border-color: oklch(0.78 0.1 85);
-  background: oklch(0.28 0.02 85);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
-}
-
-.cardGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.gridCards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-/* Gold primary call-to-action (Start / Ready / Create / Join). */
-.buttonPrimary,
-.primaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 18px;
-  color: oklch(0.2 0.02 85);
-  background: oklch(0.78 0.1 85);
-  border: none;
-  border-radius: 10px;
-  font-weight: 700;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-  transition: transform 0.16s ease, filter 0.16s ease, background-color 0.16s ease;
-}
-
-.buttonPrimary:hover:not(:disabled),
-.primaryButton:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.06);
-}
-
-button:disabled,
-.buttonPrimary:disabled,
-.primaryButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  box-shadow: none;
 }
 
 h1,
@@ -184,7 +42,6 @@ button {
   font: inherit;
 }
 
-/* Dark form inputs across the home + lobby screens. */
 input[type="text"],
 input:not([type]) {
   background: oklch(0.24 0.015 260);
@@ -197,241 +54,35 @@ input:not([type]) {
 input::placeholder { color: #6f7683; }
 input:focus { outline: none; border-color: oklch(0.55 0.06 85); }
 
-/* ===== Full-screen, no-scroll game layout (pre-game shell) ===== */
-.gameShell {
-  height: 100vh;
-  width: 100%;
-  overflow: hidden;
-  padding: 10px 14px;
-  box-sizing: border-box;
-  background: oklch(0.22 0.015 260);
-  text-align: left;
-}
-
-.gameGrid {
-  height: 100%;
-  width: 100%;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 10px;
-}
-
-/* Row 1 — header: room code + username + back */
-.gameHeader {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.gameHeader h1 {
-  font-size: 1.35rem;
-  margin: 0;
-  color: oklch(0.78 0.1 85);
-}
-.gameHeaderLeft {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.gameHeaderLeft p {
-  font-size: 0.8rem;
-  color: #b9bfc9;
-}
-.gameHeaderUsername {
-  display: flex;
+/* Gold primary call-to-action, still used by the invalid-room fallback. */
+.primaryButton {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-}
-.usernameInput {
-  padding: 0.5rem 0.6rem;
-  font-size: 0.95rem;
-  border: 1px solid oklch(0.34 0.015 260);
-  border-radius: 8px;
-  width: 200px;
-  box-sizing: border-box;
-  background: oklch(0.24 0.015 260);
-  color: #e8e9ee;
-}
-.gameHeaderBack {
-  margin-left: auto;
-}
-
-/* Row 2 — centered status / info panel */
-.gameStatusRow {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  min-height: 0;
-}
-
-/* Row 3 — board: party leader | party | active monsters */
-.gameBoard {
-  display: grid;
-  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr) minmax(280px, 340px);
-  gap: 12px;
-  min-height: 0;
-}
-.boardLeft,
-.boardCenter,
-.boardRight {
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-}
-.boardCenter {
-  min-width: 0;
-}
-.boardRight {
-  position: relative;
-  overflow: hidden;
-}
-.boardRightMonsters {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.boardLeft {
-  overflow: hidden;
-}
-.boardLeftActions {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  margin-top: auto;
-}
-.boardLeftActions > button {
-  flex: 1;
-}
-/* Pre-game states (waiting/rolling/etc.) render centered here */
-.gameBoardPre {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  overflow: auto;
-  min-height: 0;
-}
-.boardPreInner {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-/* Pre-game 3-column layout: players (left) | status cards | chat (right) */
-.boardPreGrid {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 320px;
-  gap: 16px;
-  align-items: start;
-}
-.boardPreRight {
-  position: relative;
-  display: flex;
-  height: min(65vh, 620px);
-}
-@media (max-width: 1100px) {
-  .boardPreGrid {
-    grid-template-columns: 1fr;
-  }
-  .boardPreRight {
-    height: 300px;
-  }
-}
-
-/* Row 4 — footer: deck/discard | hand button | opponents */
-.gameFooter {
-  display: flex;
-  gap: 14px;
-  align-items: stretch;
-  max-height: 230px;
-  min-height: 0;
-}
-.footerLeft {
-  display: flex;
-  gap: 12px;
-  flex-shrink: 0;
-  overflow: auto;
-}
-.footerChat {
-  flex: 0 1 340px;
-  min-width: 280px;
-  max-width: 340px;
-  display: flex;
-  position: relative;
-}
-.footerHand {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 16px;
-  flex: 1;
-  min-width: 0;
-}
-
-.footerActions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-left: auto;
-  flex-shrink: 0;
-  align-items: stretch;
-  align-self: center;
-}
-
-.gameHeaderOpponents {
-  flex: 3 1 0;
-  min-width: 0;
-  display: flex;
-  justify-content: center;
-}
-.gameHeaderStatus {
-  flex: 2 1 0;
-  min-width: 0;
-  display: flex;
-}
-.gameHeaderStatus > * {
-  width: 100%;
-}
-.footerOpponents {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-}
-.handButton {
-  padding: 18px 22px;
-  font-size: 1.05rem;
-  font-weight: 700;
+  padding: 12px 18px;
   color: oklch(0.2 0.02 85);
   background: oklch(0.78 0.1 85);
   border: none;
-  border-radius: 14px;
+  border-radius: 10px;
+  font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
-  white-space: nowrap;
+  transition: transform 0.16s ease, filter 0.16s ease;
 }
-.handButton:hover {
-  filter: brightness(1.06);
-}
+.primaryButton:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+button:disabled, .primaryButton:disabled { cursor: not-allowed; opacity: 0.5; }
 
-.bannerError {
-  padding: 0.4rem 0.9rem;
-  border-radius: 8px;
-  background: oklch(0.3 0.08 25);
-  border: 1px solid oklch(0.5 0.12 25);
-  color: #ffd9d2;
-  font-weight: 600;
+/* Simple centered page frame — the "invalid room" fallback in Game.tsx. */
+.appShell {
+  min-height: 100vh;
+  padding: 24px 20px 32px;
+  background: oklch(0.22 0.015 260);
 }
-
-/* Party grid — fill the center, flow into multiple columns */
-.partyGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.75rem;
-  align-content: start;
+.appPage {
+  max-width: 1800px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
