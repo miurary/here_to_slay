@@ -107,7 +107,7 @@ export default function Home() {
           <JoinExistingRoomCard roomCode={roomCode} setRoomCode={setRoomCode} handleJoinRoom={handleJoinRoom}/>
 
           {status && (
-            <div style={{ marginTop: '1rem', color: '#333' }}>
+            <div style={{ marginTop: '1rem', color: '#b9bfc9' }}>
               {status}
             </div>
           )}

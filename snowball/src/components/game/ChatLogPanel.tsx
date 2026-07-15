@@ -62,21 +62,21 @@ function Feed({ gameState, entries, myId, nameIndex, style }: { gameState: GameS
     return (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.4rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', ...style }}>
             {entries.length === 0 ? (
-                <div style={{ color: '#94a3b8', fontSize: '0.8rem', fontStyle: 'italic' }}>No messages yet. Say hello!</div>
+                <div style={{ color: '#8f96a3', fontSize: '0.8rem', fontStyle: 'italic' }}>No messages yet. Say hello!</div>
             ) : (
                 entries.map((e) => {
                     if (e.kind === 'chat') {
-                        const color = e.playerId === myId ? '#2563eb' : getPlayerColor(gameState, e.playerId);
+                        const color = e.playerId === myId ? 'oklch(0.78 0.1 85)' : getPlayerColor(gameState, e.playerId);
                         return (
                             <div key={e.id} style={{ fontSize: '0.82rem', lineHeight: 1.3 }}>
                                 <span style={{ fontWeight: 700, color }}>{e.username || 'Player'}: </span>
-                                <span style={{ color: '#1e293b', wordBreak: 'break-word' }}>{e.text}</span>
+                                <span style={{ color: '#cfd3db', wordBreak: 'break-word' }}>{e.text}</span>
                             </div>
                         );
                     }
                     // action / system entries: muted log lines with colored card names
                     return (
-                        <div key={e.id} style={{ fontSize: '0.76rem', color: '#64748b', fontStyle: 'italic', lineHeight: 1.3 }}>
+                        <div key={e.id} style={{ fontSize: '0.76rem', color: '#9aa0ad', fontStyle: 'italic', lineHeight: 1.3 }}>
                             {colorizeNames(e.text, nameIndex)}
                         </div>
                     );
@@ -101,29 +101,29 @@ export default function ChatLogPanel({ gameState, entries, myId, onSend }: ChatL
     };
 
     const inputRow = (
-        <form onSubmit={submit} style={{ display: 'flex', gap: '0.35rem', padding: '0.4rem', borderTop: '1px solid #e2e8f0' }}>
+        <form onSubmit={submit} style={{ display: 'flex', gap: '0.35rem', padding: '0.4rem', borderTop: '1px solid oklch(0.32 0.015 260)' }}>
             <input
                 type="text"
                 value={draft}
                 onChange={(ev) => setDraft(ev.target.value)}
                 placeholder="Chat…"
                 maxLength={500}
-                style={{ flex: 1, minWidth: 0, padding: '0.35rem 0.5rem', fontSize: '0.82rem', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                style={{ flex: 1, minWidth: 0, padding: '0.35rem 0.5rem', fontSize: '0.82rem', border: '1px solid oklch(0.34 0.015 260)', borderRadius: '6px', background: 'oklch(0.24 0.015 260)', color: '#e8e9ee' }}
             />
-            <button type="submit" style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+            <button type="submit" style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', fontWeight: 700, color: 'oklch(0.2 0.02 85)', background: 'oklch(0.78 0.1 85)', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
                 Send
             </button>
         </form>
     );
 
     const header = (onToggle: () => void, isExpanded: boolean) => (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.3rem 0.5rem', borderBottom: '1px solid #e2e8f0' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>Chat &amp; Log</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.3rem 0.5rem', borderBottom: '1px solid oklch(0.32 0.015 260)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#9aa0ad' }}>Chat &amp; Log</span>
             <button
                 type="button"
                 onClick={onToggle}
                 title={isExpanded ? 'Collapse' : 'Expand'}
-                style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem', background: 'transparent', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#475569' }}
+                style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem', background: 'transparent', border: '1px solid oklch(0.34 0.015 260)', borderRadius: '4px', cursor: 'pointer', color: '#9aa0ad' }}
             >
                 {isExpanded ? '▾ Collapse' : '▴ Expand'}
             </button>
@@ -133,7 +133,7 @@ export default function ChatLogPanel({ gameState, entries, myId, onSend }: ChatL
     return (
         <>
             {/* Docked panel — lives in the right column under the monsters */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, height: '100%', border: '1px solid #ddd', borderRadius: '8px', background: 'white', overflow: 'hidden' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, height: '100%', border: '1px solid oklch(0.34 0.015 260)', borderRadius: '8px', background: 'oklch(0.19 0.015 260)', overflow: 'hidden' }}>
                 {header(() => setExpanded(true), false)}
                 <Feed gameState={gameState} entries={entries} myId={myId} nameIndex={nameIndex} />
                 {inputRow}
@@ -143,7 +143,7 @@ export default function ChatLogPanel({ gameState, entries, myId, onSend }: ChatL
                 active monsters above, slightly translucent so you can tell there's
                 still a board underneath. */}
             {expanded && (
-                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '70vh', zIndex: 50, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(1px)', display: 'flex', flexDirection: 'column', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 8px 24px rgba(15,23,42,0.18)' }}>
+                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '70vh', zIndex: 50, background: 'oklch(0.19 0.015 260 / 0.97)', backdropFilter: 'blur(1px)', display: 'flex', flexDirection: 'column', border: '1px solid oklch(0.34 0.015 260)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
                     {header(() => setExpanded(false), true)}
                     <Feed gameState={gameState} entries={entries} myId={myId} nameIndex={nameIndex} />
                     {inputRow}

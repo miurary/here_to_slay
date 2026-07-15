@@ -10,7 +10,7 @@ export default function UsernameCard({ nameSaved, name, setName, handleSaveName 
         <div className="panel" style={{ marginBottom: '1.5rem' }}>
             <h2>Ready to play?</h2>
             {nameSaved && name ? (
-              <div style={{ fontSize: '1rem', color: '#222' }}>
+              <div style={{ fontSize: '1rem', color: '#e8e9ee' }}>
                 Welcome {name}!
               </div>
             ) : (

@@ -21,24 +21,24 @@ export default function RollCompleteCard( { gameState, myId, handleContinue, aut
             {Object.entries(gameState.diceRolls).map(([playerId, roll]) => {
                 const player = gameState.players[playerId];
                 return (
-                <div key={playerId} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
+                <div key={playerId} style={{ padding: '0.75rem', backgroundColor: 'oklch(0.24 0.015 260)', borderRadius: '8px', border: '1px solid oklch(0.34 0.015 260)' }}>
                     <div style={{ fontWeight: 'bold' }}>{player.username || 'Player'}</div>
-                    <div style={{ fontSize: '1.5rem', color: '#28a745' }}>{roll}</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'oklch(0.75 0.11 150)' }}>{roll}</div>
                 </div>
                 );
             })}
             </div>
             {autoAdvanceSeconds != null && (
-            <p style={{ fontWeight: 700, color: '#28a745', marginBottom: '0.75rem' }}>
+            <p style={{ fontWeight: 700, color: 'oklch(0.75 0.11 150)', marginBottom: '0.75rem' }}>
                 Continuing in {autoAdvanceSeconds}…
             </p>
             )}
             {gameState.lobbyLeaderId === myId ? (
-            <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+            <button type="button" onClick={handleContinue} className="buttonPrimary" style={{ fontSize: '1.05rem' }}>
                 {autoAdvanceSeconds != null ? 'Continue now' : 'Continue to Game'}
             </button>
             ) : autoAdvanceSeconds == null && (
-            <p style={{ color: '#666' }}>
+            <p style={{ color: '#9aa0ad' }}>
                 Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
             </p>
             )}

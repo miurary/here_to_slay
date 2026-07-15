@@ -17,6 +17,11 @@ dist-ssr/
 build/
 
 # =========================
+# Design Files
+# =========================
+snowball/design_handoff_game_screen/
+
+# =========================
 # Environment Variables
 # =========================
 # NEVER commit your secrets, API keys, or database passwords!

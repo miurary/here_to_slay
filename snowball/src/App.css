@@ -1,20 +1,25 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Shared dark "poker-table" theme for the home screen, lobby, and pre-game
+   flows. Palette + fonts match the in-game GameTable (see components/game/table).
+   Fonts (Alegreya / Instrument Sans) are loaded in index.html.
+   ───────────────────────────────────────────────────────────────────────── */
 :root {
-  color: #111827;
-  background: #eef2f6;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #e8e9ee;
+  background: oklch(0.22 0.015 260);
+  font-family: "Instrument Sans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: #eef2f6;
-  color: #111827;
+  background: oklch(0.22 0.015 260);
+  color: #e8e9ee;
 }
 
 .appShell {
   min-height: 100vh;
   padding: 24px 20px 32px;
-  background: #eef2f6;
+  background: oklch(0.22 0.015 260);
 }
 
 .appPage {
@@ -27,35 +32,35 @@ body {
 }
 
 .panel {
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 20px;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+  background: oklch(0.26 0.015 260);
+  border: 1px solid oklch(0.34 0.015 260);
+  border-radius: 16px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
   padding: 24px;
+  color: #e8e9ee;
 }
 
+/* Accent panels get a colored top edge instead of a light tint. */
 .panelAccentBlue {
-  background: #eff6ff;
-  border-color: #93c5fd;
+  border-color: oklch(0.55 0.12 250);
+  border-top: 3px solid oklch(0.75 0.12 250);
 }
-
 .panelAccentGreen {
-  background: #ecfdf5;
-  border-color: #6ee7b7;
+  border-color: oklch(0.5 0.11 150);
+  border-top: 3px solid oklch(0.75 0.11 150);
 }
-
 .panelAccentPurple {
-  background: #f5f3ff;
-  border-color: #c7d2fe;
+  border-color: oklch(0.5 0.12 300);
+  border-top: 3px solid oklch(0.66 0.13 300);
 }
 
 .statusPanel {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: oklch(0.24 0.015 260);
+  border-color: oklch(0.34 0.015 260);
 }
 
 .panelHand {
-  background: #ffffff;
+  background: oklch(0.26 0.015 260);
   padding: 20px;
 }
 
@@ -63,7 +68,7 @@ body {
   width: 100%;
   height: 100%;
   padding: 20px;
-  border-color: #d1d5db;
+  border-color: oklch(0.34 0.015 260);
   box-sizing: border-box;
   overflow: auto;
 }
@@ -90,29 +95,25 @@ body {
 }
 
 .card {
-  border: 1px solid #d1d5db;
+  border: 1px solid oklch(0.36 0.015 260);
   border-radius: 12px;
   padding: 6px;
   width: fit-content;
-  background: #f8fafc;
+  background: oklch(0.24 0.015 260);
   text-align: center;
   transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
   cursor: pointer;
 }
 
 .card:hover {
-  background: #f1f5f9;
+  background: oklch(0.28 0.015 260);
 }
-
-.cardHero {
-}
-
 
 .cardSelected {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: oklch(0.78 0.1 85);
+  background: oklch(0.28 0.02 85);
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
 }
 
 .cardGrid {
@@ -127,42 +128,51 @@ body {
   gap: 12px;
 }
 
-.buttonPrimary {
+/* Gold primary call-to-action (Start / Ready / Create / Join). */
+.buttonPrimary,
+.primaryButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 12px 18px;
-  color: #ffffff;
-  background: #2563eb;
+  color: oklch(0.2 0.02 85);
+  background: oklch(0.78 0.1 85);
   border: none;
-  border-radius: 12px;
-  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.18);
+  border-radius: 10px;
+  font-weight: 700;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
   cursor: pointer;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+  transition: transform 0.16s ease, filter 0.16s ease, background-color 0.16s ease;
 }
 
-.buttonPrimary:hover:not(:disabled) {
+.buttonPrimary:hover:not(:disabled),
+.primaryButton:hover:not(:disabled) {
   transform: translateY(-1px);
+  filter: brightness(1.06);
 }
 
 button:disabled,
-.buttonPrimary:disabled {
+.buttonPrimary:disabled,
+.primaryButton:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.5;
   box-shadow: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Alegreya", Georgia, serif;
+  color: #e8e9ee;
+  margin-top: 0;
 }
 
 h1 {
   margin: 0 0 0.5rem;
   font-size: 2rem;
-  letter-spacing: -0.03em;
-}
-
-h2,
-h3,
-h4 {
-  margin-top: 0;
+  letter-spacing: -0.01em;
 }
 
 p {
@@ -174,14 +184,27 @@ button {
   font: inherit;
 }
 
-/* ===== Full-screen, no-scroll game layout ===== */
+/* Dark form inputs across the home + lobby screens. */
+input[type="text"],
+input:not([type]) {
+  background: oklch(0.24 0.015 260);
+  border: 1px solid oklch(0.34 0.015 260);
+  border-radius: 8px;
+  color: #e8e9ee;
+  padding: 0.6rem 0.7rem;
+  box-sizing: border-box;
+}
+input::placeholder { color: #6f7683; }
+input:focus { outline: none; border-color: oklch(0.55 0.06 85); }
+
+/* ===== Full-screen, no-scroll game layout (pre-game shell) ===== */
 .gameShell {
   height: 100vh;
   width: 100%;
   overflow: hidden;
   padding: 10px 14px;
   box-sizing: border-box;
-  background: #eef2f6;
+  background: oklch(0.22 0.015 260);
   text-align: left;
 }
 
@@ -203,6 +226,7 @@ button {
 .gameHeader h1 {
   font-size: 1.35rem;
   margin: 0;
+  color: oklch(0.78 0.1 85);
 }
 .gameHeaderLeft {
   display: flex;
@@ -211,7 +235,7 @@ button {
 }
 .gameHeaderLeft p {
   font-size: 0.8rem;
-  color: #475569;
+  color: #b9bfc9;
 }
 .gameHeaderUsername {
   display: flex;
@@ -221,10 +245,12 @@ button {
 .usernameInput {
   padding: 0.5rem 0.6rem;
   font-size: 0.95rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid oklch(0.34 0.015 260);
   border-radius: 8px;
   width: 200px;
   box-sizing: border-box;
+  background: oklch(0.24 0.015 260);
+  color: #e8e9ee;
 }
 .gameHeaderBack {
   margin-left: auto;
@@ -258,8 +284,6 @@ button {
 .boardCenter {
   min-width: 0;
 }
-/* Right column: active monsters stacked over a chat/log dock. Positioned so the
-   chat's expanded overlay can cover the monsters above it. */
 .boardRight {
   position: relative;
   overflow: hidden;
@@ -270,12 +294,9 @@ button {
   display: flex;
   flex-direction: column;
 }
-/* The left column never scrolls: the leader art scales to fit instead. */
 .boardLeft {
   overflow: hidden;
 }
-/* End Turn + Quit side by side, pinned to the bottom of the left column so they
-   line up with the bottom of the party and active monsters. */
 .boardLeftActions {
   flex: 0 0 auto;
   display: flex;
@@ -294,7 +315,6 @@ button {
   overflow: auto;
   min-height: 0;
 }
-/* Middle column of .boardPreGrid: the status cards. */
 .boardPreInner {
   display: flex;
   flex-direction: column;
@@ -310,7 +330,6 @@ button {
   gap: 16px;
   align-items: start;
 }
-/* position:relative anchors the chat's expand overlay, same as .footerChat. */
 .boardPreRight {
   position: relative;
   display: flex;
@@ -339,8 +358,6 @@ button {
   flex-shrink: 0;
   overflow: auto;
 }
-/* Bottom-right chat: mirrors the Active Monsters column width above it, and
-   fills the footer (hand) height. position:relative anchors the expand overlay. */
 .footerChat {
   flex: 0 1 340px;
   min-width: 280px;
@@ -390,24 +407,24 @@ button {
   padding: 18px 22px;
   font-size: 1.05rem;
   font-weight: 700;
-  color: #fff;
-  background: #2563eb;
+  color: oklch(0.2 0.02 85);
+  background: oklch(0.78 0.1 85);
   border: none;
   border-radius: 14px;
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
 }
 .handButton:hover {
-  background: #1d4ed8;
+  filter: brightness(1.06);
 }
 
 .bannerError {
   padding: 0.4rem 0.9rem;
   border-radius: 8px;
-  background: #fee2e2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  background: oklch(0.3 0.08 25);
+  border: 1px solid oklch(0.5 0.12 25);
+  color: #ffd9d2;
   font-weight: 600;
 }
 

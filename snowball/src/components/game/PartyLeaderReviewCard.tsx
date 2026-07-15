@@ -21,14 +21,14 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue,
                 const chosen = player.zones.party[0];
                 const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
                 return (
-                    <div key={player.id} style={{ flex: '1 1 0', minWidth: '160px', padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
+                    <div key={player.id} style={{ flex: '1 1 0', minWidth: '160px', padding: '0.75rem', backgroundColor: 'oklch(0.24 0.015 260)', borderRadius: '8px', border: '1px solid oklch(0.34 0.015 260)' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{player.username || 'Player'}</div>
                     {chosen ? (
                         <>
                         <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                         </>
                     ) : (
-                        <div style={{ color: '#999' }}>No party leader chosen</div>
+                        <div style={{ color: '#9aa0ad' }}>No party leader chosen</div>
                     )}
                     </div>
                 );
@@ -40,7 +40,7 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue,
                 {gameState.activeMonsters.map((monster) => {
                     const template = gameState.cardTemplates[monster.templateId];
                     return (
-                    <div key={monster.instanceId} style={{ padding: '0.5rem', backgroundColor: 'white', borderRadius: '8px', border: '1px solid #ddd' }}>
+                    <div key={monster.instanceId} style={{ padding: '0.5rem', backgroundColor: 'oklch(0.24 0.015 260)', borderRadius: '8px', border: '1px solid oklch(0.34 0.015 260)' }}>
                         <CardArt cardId={monster.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                     </div>
                     );
@@ -48,16 +48,16 @@ export default function PartyLeaderReviewCard({ gameState, myId, handleContinue,
                 </div>
             </div>
             {autoAdvanceSeconds != null && (
-                <p style={{ fontWeight: 700, color: '#20c997', marginBottom: '0.75rem' }}>
+                <p style={{ fontWeight: 700, color: 'oklch(0.75 0.11 150)', marginBottom: '0.75rem' }}>
                 Starting in {autoAdvanceSeconds}…
                 </p>
             )}
             {gameState.lobbyLeaderId === myId ? (
-                <button type="button" onClick={handleContinue} style={{ padding: '0.75rem 1.5rem', fontSize: '1.1rem', backgroundColor: '#20c997', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                <button type="button" onClick={handleContinue} className="buttonPrimary" style={{ fontSize: '1.05rem' }}>
                 {autoAdvanceSeconds != null ? 'Start now' : 'Continue to Game'}
                 </button>
             ) : autoAdvanceSeconds == null && (
-                <p style={{ color: '#666' }}>
+                <p style={{ color: '#9aa0ad' }}>
                 Waiting for {gameState.lobbyLeaderId ? gameState.players[gameState.lobbyLeaderId]?.username : 'the lobby leader'} to continue to the game...
                 </p>
             )}

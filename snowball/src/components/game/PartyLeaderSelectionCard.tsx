@@ -14,7 +14,7 @@ export default function PartyLeaderSelectionCard({ gameState, myId, handleChoose
         <p style={{ marginBottom: '1rem' }}>
             Current chooser: {gameState.currentSelectionPlayerId ? gameState.players[gameState.currentSelectionPlayerId]?.username || 'Player' : 'None'}
         </p>
-        <p style={{ marginBottom: '1rem', color: '#333' }}>
+        <p style={{ marginBottom: '1rem', color: '#b9bfc9' }}>
             {gameState.currentSelectionPlayerId === myId
             ? 'It is your turn to choose a party leader from the face down cards below.'
             : 'Waiting for the current player to choose a party leader.'}
@@ -28,10 +28,10 @@ export default function PartyLeaderSelectionCard({ gameState, myId, handleChoose
                 disabled={gameState.currentSelectionPlayerId !== myId}
                 style={{
                 height: '150px',
-                backgroundColor: '#4a148c',
-                color: 'white',
-                borderRadius: '8px',
-                border: '2px solid #2e0a4d',
+                backgroundColor: 'oklch(0.32 0.09 300)',
+                color: '#e8e9ee',
+                borderRadius: '10px',
+                border: '1px solid oklch(0.5 0.12 300)',
                 cursor: gameState.currentSelectionPlayerId === myId ? 'pointer' : 'not-allowed',
                 display: 'flex',
                 flexDirection: 'column',
@@ -51,12 +51,12 @@ export default function PartyLeaderSelectionCard({ gameState, myId, handleChoose
                 const chosen = player.zones.party[0];
                 const template = chosen ? gameState.cardTemplates[chosen.templateId] : undefined;
                 return (
-                <div key={player.id} style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
+                <div key={player.id} style={{ padding: '0.75rem', backgroundColor: 'oklch(0.24 0.015 260)', borderRadius: '8px', border: '1px solid oklch(0.34 0.015 260)' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{player.username || 'Player'}</div>
                     {chosen ? (
                         <CardArt cardId={chosen.templateId} name={template?.name} style={{ margin: '0 auto' }} />
                     ) : (
-                    <div style={{ color: '#999' }}>Not chosen yet</div>
+                    <div style={{ color: '#9aa0ad' }}>Not chosen yet</div>
                     )}
                 </div>
                 );
