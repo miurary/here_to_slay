@@ -12,6 +12,7 @@ import Lobby from './components/pregame/Lobby';
 import RollForFirst from './components/pregame/RollForFirst';
 import LeaderSelection from './components/pregame/LeaderSelection';
 import LeaderReview from './components/pregame/LeaderReview';
+import EndGame from './components/endgame/EndGame';
 import { getPlayerId } from './utils/playerId';
 
 const MAX_PLAYERS = 6;
@@ -291,6 +292,10 @@ export default function Game() {
     socket?.emit('toggleReady');
   };
 
+  const handleSetExclusions = (excludedTemplateIds: string[]) => {
+    socket?.emit('setDeckExclusions', excludedTemplateIds);
+  };
+
   const showToast = (text: string) => {
     setToast(text);
     setTimeout(() => setToast((t) => (t === text ? null : t)), 3500);
@@ -358,6 +363,15 @@ export default function Game() {
 
   const handleSendChat = (message: string) => {
     socket?.emit('sendChat', message);
+  };
+
+  // Game-over actions. Rematch is a server-owned vote (room returns to the lobby
+  // once everyone opts in); Back to lobby resets the room immediately.
+  const handleVoteRematch = () => {
+    socket?.emit('voteRematch');
+  };
+  const handleBackToLobby = () => {
+    socket?.emit('quitGame');
   };
 
   // Select a party hero to roll its ability (drives the felt roll strip).
@@ -689,6 +703,9 @@ export default function Game() {
     statusGold = gs.lobbyLeaderId === myId;
   } else if (phase === 'finished') {
     statusMain = 'GAME OVER';
+    const won = gs.winnerId === myId;
+    statusSub = won ? 'victory is yours' : `${pname(gs.winnerId)} takes the game`;
+    statusGold = won;
   }
 
   let content: React.ReactNode;
@@ -696,7 +713,7 @@ export default function Game() {
     content = <div style={{ color: '#9aa0ad', fontSize: 14 }}>Connecting…</div>;
   } else if (phase === 'waiting') {
     content = (
-      <Lobby gameState={gs} myId={myId} players={players} roomCode={roomCode} onCopyInvite={handleCopyInvite} onStart={handleStart} onToggleReady={handleToggleReady} />
+      <Lobby gameState={gs} myId={myId} players={players} roomCode={roomCode} onCopyInvite={handleCopyInvite} onStart={handleStart} onToggleReady={handleToggleReady} onSetExclusions={handleSetExclusions} />
     );
   } else if (phase === 'rolling' || (phase === 'roll_complete' && rollAnimActive)) {
     content = (
@@ -711,13 +728,14 @@ export default function Game() {
   } else if (phase === 'party_leader_review') {
     content = <LeaderReview gameState={gs} myId={myId} onBegin={handleContinue} autoAdvanceSeconds={autoAdvanceSeconds} />;
   } else if (phase === 'finished') {
-    const winner = gs.winnerId ? gs.players[gs.winnerId] : undefined;
     content = (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, textAlign: 'center' }}>
-        <span style={{ fontFamily: '"Alegreya", Georgia, serif', fontWeight: 800, fontSize: 40, color: 'oklch(0.82 0.1 85)' }}>Game over</span>
-        <span style={{ fontSize: 16, fontWeight: 700 }}>{winner ? `${winner.username ?? 'A player'} wins!` : 'The game has ended.'}</span>
-        {winner && <span style={{ fontSize: 12, color: '#b9bfc9' }}>{winner.slainMonsters.length} monster{winner.slainMonsters.length !== 1 ? 's' : ''} slain.</span>}
-      </div>
+      <EndGame
+        gameState={gs}
+        myId={myId}
+        onRematch={handleVoteRematch}
+        onBackToLobby={handleBackToLobby}
+        onLeave={() => navigate('/')}
+      />
     );
   }
 

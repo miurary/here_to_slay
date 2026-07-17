@@ -8,6 +8,7 @@
     "start": "node dist/wiggles/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fuzz": "FUZZ_GAMES=1000 vitest run test/fuzz.test.ts",
     "test:coverage": "vitest run --coverage",
     "validate-cards": "tsx ./scripts/validate-cards.ts",
     "dev": "tsx watch ./src/server.ts"

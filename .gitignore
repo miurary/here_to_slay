@@ -73,3 +73,6 @@ Thumbs.db
 # Game analytics event logs (JSONL, may contain hidden-info hands)
 # =========================
 analytics/
+
+# Fuzz-test failure repro bundles (seed + action log + state snapshot)
+wiggles/test/fuzz-failures/

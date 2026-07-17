@@ -53,7 +53,8 @@ const drawCards = (deck: CardInstance[], count: number): CardInstance[] => {
   return deck.splice(0, count);
 };
 
-const initializeDecks = () => {
+const initializeDecks = (excludedTemplateIds: string[] = []) => {
+  const excluded = new Set(excludedTemplateIds);
   const monsterTemplates = loadCardDefinitions('monster.json');
   const partyLeaderTemplates = loadCardDefinitions('party_leader.json');
   const mainTemplates = [
@@ -63,7 +64,7 @@ const initializeDecks = () => {
     ...loadCardDefinitions('modifier.json'),
     ...loadCardDefinitions('challenge.json'),
     ...loadCardDefinitions('cursed_item.json'),
-  ];
+  ].filter(t => !excluded.has(t.id));
 
   return {
     monsterDeck: shuffle(createCardInstances(monsterTemplates)),

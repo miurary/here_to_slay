@@ -632,3 +632,50 @@ describe('reconnection and seat grace', () => {
     expect(gs.currentSelectionPlayerId).toBe('p3');
   });
 });
+
+describe('voteRematch', () => {
+  it('resets the room to the lobby once every connected player votes', () => {
+    const gs = buildGameState({ status: 'finished', players: [
+      buildPlayer({ id: 'p1', party: [makeCard('h_001')], slainMonsters: [makeMonster('m_001')] }),
+      buildPlayer({ id: 'p2', party: [makeCard('h_001')] }),
+    ] });
+    gs.winnerId = 'p1';
+    const h = createHarness(gs);
+    const s1 = connect(h, 'p1');
+    const s2 = connect(h, 'p2');
+
+    s1.fire('voteRematch');
+    expect(gs.status).toBe('finished');
+    expect(gs.rematchVotes).toContain('p1');
+
+    s2.fire('voteRematch');
+    expect(gs.status).toBe('waiting');
+    expect(gs.rematchVotes).toEqual([]);
+    expect(gs.winnerId).toBeUndefined();
+    expect(gs.players['p1']!.zones.party).toEqual([]);
+    expect(gs.players['p1']!.slainMonsters).toEqual([]);
+    expect(gs.players['p1']!.ready).toBe(false);
+  });
+
+  it('ignores duplicate votes from the same player', () => {
+    const gs = buildGameState({ status: 'finished', players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    gs.winnerId = 'p1';
+    const h = createHarness(gs);
+    const s1 = connect(h, 'p1');
+    connect(h, 'p2');
+    s1.fire('voteRematch');
+    s1.fire('voteRematch');
+    expect(gs.rematchVotes).toEqual(['p1']);
+    expect(gs.status).toBe('finished');
+  });
+
+  it('does nothing when the game is not finished', () => {
+    const gs = buildGameState({ status: 'in_progress', players: [buildPlayer({ id: 'p1' }), buildPlayer({ id: 'p2' })] });
+    const h = createHarness(gs);
+    const s1 = connect(h, 'p1');
+    connect(h, 'p2');
+    s1.fire('voteRematch');
+    expect(gs.rematchVotes ?? []).toEqual([]);
+    expect(gs.status).toBe('in_progress');
+  });
+});

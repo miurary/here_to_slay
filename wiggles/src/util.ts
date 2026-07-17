@@ -91,6 +91,7 @@ const applyWinIfMet = (gameState: GameState, player: Player, playerId: string): 
   if (checkWinCondition(gameState, player)) {
     gameState.status = 'finished';
     gameState.winnerId = playerId;
+    gameState.gameEndedAt = Date.now();
     void endGameSession(gameState, 'win');
     return true;
   }

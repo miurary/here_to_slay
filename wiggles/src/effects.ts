@@ -114,6 +114,7 @@ const drawCardsForPlayer = (
   const drawn = drawCards(gameState.mainDeck, count);
   player.zones.hand.push(...drawn);
   if (drawn.length > 0) {
+    gameState.cardsDrawn = (gameState.cardsDrawn ?? 0) + drawn.length;
     logGame(gameState, 'cards_drawn', {
       count: drawn.length,
       templateIds: drawn.map(c => c.templateId),

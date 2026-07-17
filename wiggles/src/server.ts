@@ -76,6 +76,8 @@ const createInitialGameState = (roomCode: string): GameState => ({
   currentRollerId: undefined,
   firstPlayerId: undefined,
   targetMonstersToWin: undefined,
+  rematchVotes: [],
+  cardsDrawn: 0,
   gameLog: []
 });
 
@@ -165,6 +167,8 @@ const beginPartyLeaderSelection = (gameState: GameState) => {
 
 const beginInProgress = (gameState: GameState) => {
   gameState.status = 'in_progress';
+  // Stamp the start of active play for the end-game "game lasted" stat.
+  gameState.gameStartedAt = Date.now();
   const desired = gameState.firstPlayerId ?? Object.keys(gameState.players)[0] ?? '';
   gameState.activePlayerId = isSeatConnected(gameState, desired)
     ? desired
@@ -630,6 +634,23 @@ const handleConnection = (socket: Socket) => {
     sendRoomUpdate();
   });
 
+  socket.on('setDeckExclusions', (excludedTemplateIds) => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'waiting') return;
+    if (pid !== gameState.lobbyLeaderId) {
+      socket.emit('actionFailed', 'Only the host can edit the deck.');
+      return;
+    }
+    if (!Array.isArray(excludedTemplateIds)) return;
+    // Only main-deck templates may be excluded — monsters and party leaders
+    // live in separate decks. Unknown ids are silently dropped.
+    const MAIN_DECK_TYPES = new Set(['hero', 'item', 'magic', 'modifier', 'challenge']);
+    gameState.excludedCardIds = [...new Set(excludedTemplateIds)].filter(id =>
+      typeof id === 'string' && MAIN_DECK_TYPES.has((gameState.cardTemplates[id]?.type ?? '').toLowerCase())
+    );
+    sendRoomUpdate();
+  });
+
   socket.on('startGame', () => {
     const gameState = getRoomState(socket.data.roomCode as string);
     if (!gameState || gameState.status !== 'waiting') {
@@ -649,7 +670,13 @@ const handleConnection = (socket: Socket) => {
       return;
     }
 
-    const { monsterDeck, partyLeaderDeck, mainDeck } = initializeDecks();
+    const { monsterDeck, partyLeaderDeck, mainDeck } = initializeDecks(gameState.excludedCardIds ?? []);
+    // Guard against a deck-editor config that can't even deal opening hands
+    // and leave a playable draw pile.
+    if (mainDeck.length < Object.keys(gameState.players).length * 5 + 10) {
+      socket.emit('actionFailed', 'Too many cards are excluded from the deck to start a game.');
+      return;
+    }
     gameState.monsterDeck = monsterDeck;
     gameState.partyLeaderDeck = partyLeaderDeck;
     gameState.mainDeck = mainDeck;
@@ -681,6 +708,7 @@ const handleConnection = (socket: Socket) => {
       lobbyLeaderId: gameState.lobbyLeaderId,
       targetMonstersToWin: gameState.targetMonstersToWin ?? 3,
       activeMonsters: gameState.activeMonsters.map(m => m.templateId),
+      excludedCardIds: gameState.excludedCardIds ?? [],
     }, pid);
 
     sendRoomUpdate();
@@ -1765,13 +1793,11 @@ const handleConnection = (socket: Socket) => {
     sendRoomUpdate();
   });
 
-  socket.on('quitGame', () => {
-    const gameState = getRoomState(socket.data.roomCode as string);
-    if (!gameState) return;
-
-    // Close the analytics session while the final board is still intact.
-    void endGameSession(gameState, 'reset', { resetBy: pid });
-
+  // Reset a room's board back to the lobby with the same seats (used by both an
+  // explicit reset/back-to-lobby and an all-voted rematch). Clears the game log;
+  // the caller adds the appropriate notice afterwards.
+  const clearBoardToLobby = (gameState: GameState) => {
+    const rc = socket.data.roomCode as string;
     gameState.status = 'waiting';
     gameState.activePlayerId = gameState.lobbyLeaderId || '';
     gameState.turnNumber = 0;
@@ -1784,23 +1810,28 @@ const handleConnection = (socket: Socket) => {
     gameState.discardedMonsters = [];
     gameState.discardPile = [];
     gameState.diceRolls = {};
-    clearAutoAdvance(socket.data.roomCode as string, gameState);
-    pendingChallenges.delete(socket.data.roomCode as string);
+    clearAutoAdvance(rc, gameState);
+    pendingChallenges.delete(rc);
     delete gameState.pendingChallenge;
-    modifierPhases.delete(socket.data.roomCode as string);
+    modifierPhases.delete(rc);
     delete gameState.modifierPhase;
     gameState.currentRollerId = undefined;
     gameState.firstPlayerId = undefined;
     gameState.rollWinnerId = undefined;
+    delete gameState.winnerId;
     gameState.availablePartyLeaderCards = [];
     gameState.partyLeaderSelectionOrder = [];
     gameState.currentSelectionPlayerId = undefined;
+    gameState.rematchVotes = [];
+    gameState.cardsDrawn = 0;
+    delete gameState.gameStartedAt;
+    delete gameState.gameEndedAt;
 
     // Back in the lobby there is no seat-holding — drop anyone still
     // disconnected rather than let a ghost block the ready-up gate.
     for (const playerId of Object.keys(gameState.players)) {
       if (gameState.players[playerId]?.connected === false) {
-        cancelSeatRemoval(socket.data.roomCode as string, playerId);
+        cancelSeatRemoval(rc, playerId);
         delete gameState.players[playerId];
       }
     }
@@ -1816,9 +1847,40 @@ const handleConnection = (socket: Socket) => {
       player.ready = false;
     }
 
-    // Fresh game back in the lobby — start the log over with the reset notice.
     gameState.gameLog = [];
+  };
+
+  socket.on('quitGame', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState) return;
+
+    // Close the analytics session while the final board is still intact.
+    void endGameSession(gameState, 'reset', { resetBy: pid });
+
+    clearBoardToLobby(gameState);
     logEvent(gameState, 'system', `${nameOf(gameState, pid)} reset the game.`, { id: pid, username: gameState.players[pid]?.username });
+
+    sendRoomUpdate();
+  });
+
+  // Game-over rematch: each player opts in; the room returns to the lobby (same
+  // seats) once every connected player has voted. Server owns the tally.
+  socket.on('voteRematch', () => {
+    const gameState = getRoomState(socket.data.roomCode as string);
+    if (!gameState || gameState.status !== 'finished') return;
+    if (!Array.isArray(gameState.rematchVotes)) gameState.rematchVotes = [];
+
+    if (!gameState.rematchVotes.includes(pid)) {
+      gameState.rematchVotes.push(pid);
+      logEvent(gameState, 'action', `${nameOf(gameState, pid)} wants a rematch.`, { id: pid, username: gameState.players[pid]?.username });
+    }
+
+    const connected = Object.values(gameState.players).filter((p) => p.connected !== false);
+    const everyoneIn = connected.length >= 2 && connected.every((p) => gameState.rematchVotes!.includes(p.id));
+    if (everyoneIn) {
+      clearBoardToLobby(gameState);
+      logEvent(gameState, 'system', 'Rematch starting — back to the lobby.');
+    }
 
     sendRoomUpdate();
   });

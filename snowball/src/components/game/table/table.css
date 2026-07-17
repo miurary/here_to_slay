@@ -13,6 +13,20 @@
   70%  { transform: scale(1.12) rotate(4deg); }
   100% { transform: scale(1) rotate(0deg); }
 }
+@keyframes gt-bannerIn {
+  0%   { opacity: 0; transform: translateY(14px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes gt-crownPop {
+  0%   { transform: scale(0) rotate(-20deg); }
+  65%  { transform: scale(1.18) rotate(6deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+@keyframes gt-sparkle {
+  0%   { transform: translateY(0); opacity: 0; }
+  15%  { opacity: 0.9; }
+  100% { transform: translateY(-120px); opacity: 0; }
+}
 
 .gt-root {
   min-height: 100vh;

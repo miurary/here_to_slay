@@ -113,6 +113,8 @@ export interface ClientToServerEvents {
   setUsername: (username: string) => void;
   startGame: () => void;
   toggleReady: () => void;
+  /** Lobby leader only: set which main-deck templates are excluded from the next game. */
+  setDeckExclusions: (excludedTemplateIds: string[]) => void;
   rollForFirst: () => void;
   rollHeroAbility: (heroInstanceId: string) => void;
   activateHeroAbility: (heroInstanceId: string) => void;
@@ -134,6 +136,8 @@ export interface ClientToServerEvents {
   drawFromMain: () => void;
   endTurn: () => void;
   quitGame: () => void;
+  /** Opt in to a rematch on the game-over screen; the room returns to the lobby once everyone votes. */
+  voteRematch: () => void;
   sendChat: (message: string) => void;
   reportBug: (report: BugReportInput) => void;
 }
@@ -277,9 +281,22 @@ export interface GameState {
   currentRollerId: string | undefined;
   firstPlayerId: string | undefined;
   targetMonstersToWin: number | undefined;
+  /** Lobby deck editor: main-deck template ids the leader has excluded from the
+      next game. Empty/undefined means the full deck. Monsters and party leaders
+      live in separate decks and cannot be excluded. */
+  excludedCardIds?: string[];
   pendingChallenge?: PendingChallengeInfo;
   modifierPhase?: ModifierPhaseInfo;
   winnerId?: string;
+  /** While status is 'finished': ids of players who have voted for a rematch.
+      When every connected player has voted the room resets to the lobby. */
+  rematchVotes?: string[];
+  /** Epoch ms when active play began (status → 'in_progress'). */
+  gameStartedAt?: number;
+  /** Epoch ms when the game was won (status → 'finished'). */
+  gameEndedAt?: number;
+  /** Running count of cards drawn from the main deck during play (for end-game stats). */
+  cardsDrawn?: number;
   /** Epoch ms when the server will auto-advance out of roll_complete /
       party_leader_review; clients render a countdown from it. */
   autoAdvanceAt?: number;

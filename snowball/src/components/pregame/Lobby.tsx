@@ -1,6 +1,7 @@
 import type { GameState, PlayerState } from '../../../../shared/types';
 import { T, displayName } from '../game/table/tableUtils';
 import { SEAT_COLORS } from './pregameUtils';
+import DeckEditor from './DeckEditor';
 
 interface LobbyProps {
   gameState: GameState;
@@ -10,6 +11,7 @@ interface LobbyProps {
   onCopyInvite: () => void;
   onStart: () => void;
   onToggleReady: () => void;
+  onSetExclusions: (excludedTemplateIds: string[]) => void;
 }
 
 const MAX_SEATS = 6;
@@ -20,7 +22,7 @@ const MAX_SEATS = 6;
  * and the start/ready control. The host starts once ≥2 players are all ready;
  * everyone else readies up.
  */
-export default function Lobby({ gameState, myId, players, roomCode, onCopyInvite, onStart, onToggleReady }: LobbyProps) {
+export default function Lobby({ gameState, myId, players, roomCode, onCopyInvite, onStart, onToggleReady, onSetExclusions }: LobbyProps) {
   const leaderId = gameState.lobbyLeaderId;
   const iAmHost = leaderId === myId;
   const everyoneReady = players.every((p) => p.id === leaderId || p.ready);
@@ -69,6 +71,8 @@ export default function Lobby({ gameState, myId, players, roomCode, onCopyInvite
           );
         })}
       </div>
+
+      <DeckEditor gameState={gameState} isHost={iAmHost} onSetExclusions={onSetExclusions} />
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
         {iAmHost ? (
