@@ -18,9 +18,7 @@ ECR_HOST="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 ECR_URI="$ECR_HOST/$ECR_REPO"
 
 # Frontend (static site: S3 origin + CloudFront)
-# Find the bucket:  aws cloudfront get-distribution-config --id EEESGFDKI1CIE \
-#                     --query 'DistributionConfig.Origins.Items[].DomainName'
-FRONTEND_BUCKET="REPLACE_ME"                 # <-- set once (bucket name only, no s3://)
+FRONTEND_BUCKET="snowball-frontend-s3"
 CLOUDFRONT_DISTRIBUTION_ID="EEESGFDKI1CIE"
 
 # Backend host (Lightsail instance running docker compose in REMOTE_DIR)
@@ -29,11 +27,6 @@ DEPLOY_USER="ec2-user"
 SSH_KEY="$HOME/.ssh/lightsail-wiggles.pem"   # <-- set to your Lightsail key path
 REMOTE_DIR="/opt/wiggles"
 # ─────────────────────────────────────────────────────────────────────────────
-
-if [[ "$FRONTEND_BUCKET" == "REPLACE_ME" ]]; then
-  echo "Set FRONTEND_BUCKET at the top of deploy.sh first." >&2
-  exit 1
-fi
 
 # ── 1. Build both artifacts ───────────────────────────────────────────────────
 echo "==> Building frontend bundle + backend image..."
